@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Vaqya M&A Target Intelligence</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: 'Segoe UI', Inter, system-ui, sans-serif; }
+
+  /* Scrollable kanban */
+  #kanban-container { overflow-x: auto; }
+  .kanban-col { min-width: 220px; max-width: 220px; }
+  .kanban-card { cursor: grab; user-select: none; }
+  .kanban-card:active { cursor: grabbing; }
+  .kanban-col.drag-over { background: #f0fdfa; border: 2px dashed #0d9488; }
+
+  /* Slide-out detail panel */
+  #detail-panel {
+    position: fixed; top: 0; right: -520px; width: 500px; height: 100vh;
+    background: white; box-shadow: -4px 0 30px rgba(0,0,0,0.15);
+    transition: right 0.3s ease; z-index: 50; overflow-y: auto;
+  }
+  #detail-panel.open { right: 0; }
+  #panel-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 40;
+  }
+  #panel-overlay.open { display: block; }
+
+  /* Score bars */
+  .score-bar-track { background: #e5e7eb; border-radius: 9999px; height: 10px; }
+  .score-bar-fill  { height: 10px; border-radius: 9999px; transition: width 0.5s ease; }
+
+  /* Table */
+  #target-table th { cursor: pointer; user-select: none; }
+  #target-table th:hover { background: #f1f5f9; }
+  .sort-arrow { opacity: 0.4; font-size: 11px; }
+  .sort-active .sort-arrow { opacity: 1; }
+
+  /* Stage badges */
+  .stage-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 12px; white-space: nowrap; }
+
+  /* Modals */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 60; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box { background: white; border-radius: 16px; max-width: 560px; width: 95%; max-height: 90vh; overflow-y: auto; }
+
+  /* Kanban column colors */
+  .kanban-header-Prospect      { background:#f1f5f9; color:#475569; }
+  .kanban-header-Researched    { background:#dbeafe; color:#1e40af; }
+  .kanban-header-Contacted     { background:#ede9fe; color:#5b21b6; }
+  .kanban-header-NDA           { background:#e0e7ff; color:#3730a3; }
+  .kanban-header-Due\ Diligence{ background:#fef3c7; color:#92400e; }
+  .kanban-header-LOI           { background:#ffedd5; color:#c2410c; }
+  .kanban-header-Closed        { background:#dcfce7; color:#166534; }
+  .kanban-header-Dead          { background:#fee2e2; color:#991b1b; }
+
+  @media print { .no-print { display: none !important; } }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- ═══════════════════ HEADER ═══════════════════ -->
+<header class="bg-teal-800 text-white sticky top-0 z-30 shadow-lg no-print">
+  <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+    <div class="flex items-center gap-3">
+      <div class="bg-teal-600 rounded-lg px-3 py-1 font-black text-xl tracking-tight">V</div>
+      <div>
+        <div class="font-bold text-lg leading-tight">M&A Target Intelligence</div>
+        <div class="text-teal-200 text-xs">Vaqya Acquisition Pipeline</div>
+      </div>
+    </div>
+    <!-- Stats bar -->
+    <div class="flex gap-4 flex-wrap" id="header-stats">
+      <div class="text-center"><div class="text-xl font-bold" id="stat-total">0</div><div class="text-teal-300 text-xs">Total Targets</div></div>
+      <div class="text-center"><div class="text-xl font-bold" id="stat-pipeline">0</div><div class="text-teal-300 text-xs">In Pipeline</div></div>
+      <div class="text-center"><div class="text-xl font-bold text-emerald-300" id="stat-tier-a">0</div><div class="text-teal-300 text-xs">Priority A</div></div>
+      <div class="text-center"><div class="text-xl font-bold text-yellow-300" id="stat-avg-score">—</div><div class="text-teal-300 text-xs">Avg Score</div></div>
+    </div>
+    <!-- Action buttons -->
+    <div class="flex gap-2 flex-wrap">
+      <button onclick="triggerImport()" class="bg-teal-600 hover:bg-teal-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1">
+        ↑ Import JSON
+      </button>
+      <button onclick="openAddModal()" class="bg-white text-teal-800 hover:bg-teal-50 px-3 py-1.5 rounded-lg text-sm font-medium">
+        + Add Target
+      </button>
+      <button onclick="exportCSV()" class="bg-teal-700 hover:bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
+        ↓ CSV
+      </button>
+      <button onclick="exportJSON()" class="bg-teal-700 hover:bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
+        ↓ JSON
+      </button>
+    </div>
+  </div>
+  <input type="file" id="json-file-input" accept=".json" class="hidden" onchange="handleImport(event)"/>
+</header>
+
+<!-- ═══════════════════ FILTERS ═══════════════════ -->
+<div class="bg-white border-b sticky top-[60px] z-20 no-print shadow-sm">
+  <div class="max-w-screen-2xl mx-auto px-4 py-2 flex flex-wrap gap-2 items-center">
+    <input id="filter-search" type="text" placeholder="Search company / city..." oninput="applyFilters()"
+      class="border rounded-lg px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-teal-500"/>
+    <select id="filter-state" onchange="applyFilters()"
+      class="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+      <option value="">All States</option>
+    </select>
+    <select id="filter-metro" onchange="applyFilters()"
+      class="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+      <option value="">All Metros</option>
+    </select>
+    <select id="filter-band" onchange="applyFilters()"
+      class="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+      <option value="">All Rev Bands</option>
+      <option>$5M-$15M</option><option>$15M-$30M</option><option>$2M-$5M</option>
+      <option>$30M-$50M</option><option>$50M+</option><option>$1M-$2M</option>
+      <option>&lt;$1M</option><option>Unknown</option>
+    </select>
+    <select id="filter-stage" onchange="applyFilters()"
+      class="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+      <option value="">All Stages</option>
+      <option>Prospect</option><option>Researched</option><option>Contacted</option>
+      <option>NDA</option><option>Due Diligence</option><option>LOI</option>
+      <option>Closed</option><option>Dead</option>
+    </select>
+    <select id="filter-tier" onchange="applyFilters()"
+      class="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+      <option value="">All Tiers</option>
+      <option>A</option><option>B</option><option>C</option><option>D</option>
+    </select>
+    <span class="text-xs text-gray-400" id="filter-count"></span>
+    <button onclick="clearFilters()" class="text-xs text-teal-600 hover:underline ml-1">Clear</button>
+  </div>
+</div>
+
+<!-- ═══════════════════ TABS ═══════════════════ -->
+<div class="bg-white border-b sticky top-[108px] z-10 no-print">
+  <div class="max-w-screen-2xl mx-auto px-4 flex gap-0">
+    <button id="tab-list"     onclick="switchTab('list')"     class="tab-btn px-5 py-3 text-sm font-medium border-b-3 border-transparent text-gray-600">Target List</button>
+    <button id="tab-pipeline" onclick="switchTab('pipeline')" class="tab-btn px-5 py-3 text-sm font-medium border-b-3 border-transparent text-gray-600">Pipeline Board</button>
+    <button id="tab-analytics"onclick="switchTab('analytics')"class="tab-btn px-5 py-3 text-sm font-medium border-b-3 border-transparent text-gray-600">Analytics</button>
+  </div>
+</div>
+
+<div class="max-w-screen-2xl mx-auto px-4 py-4">
+
+<!-- ═══════════════════ TARGET LIST TAB ═══════════════════ -->
+<div id="view-list" class="tab-view">
+  <div class="overflow-x-auto bg-white rounded-2xl shadow">
+    <table id="target-table" class="w-full text-sm">
+      <thead class="bg-gray-50 border-b">
+        <tr>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-8">
+            <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" class="rounded"/>
+          </th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase" onclick="sortBy('company_name')">Company <span class="sort-arrow" data-col="company_name">↕</span></th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase" onclick="sortBy('state')">State <span class="sort-arrow" data-col="state">↕</span></th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden md:table-cell" onclick="sortBy('metro_region')">Metro <span class="sort-arrow" data-col="metro_region">↕</span></th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden lg:table-cell" onclick="sortBy('revenue_band')">Revenue <span class="sort-arrow" data-col="revenue_band">↕</span></th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden lg:table-cell" onclick="sortBy('employee_count_est')">Emp <span class="sort-arrow" data-col="employee_count_est">↕</span></th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden xl:table-cell">Specialty</th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase" onclick="sortBy('score')">Score <span class="sort-arrow" data-col="score">↕</span></th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Stage</th>
+          <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase hidden md:table-cell">Assigned</th>
+          <th class="px-3 py-3 w-8"></th>
+        </tr>
+      </thead>
+      <tbody id="table-body" class="divide-y divide-gray-100"></tbody>
+    </table>
+    <div id="table-empty" class="hidden text-center py-16 text-gray-400">
+      <div class="text-4xl mb-2">🔍</div>
+      <div class="font-medium">No targets yet</div>
+      <div class="text-sm mt-1">Import a JSON file from the scraper or add targets manually.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ PIPELINE BOARD TAB ═══════════════════ -->
+<div id="view-pipeline" class="tab-view hidden">
+  <div id="kanban-container" class="flex gap-3 pb-4">
+    <!-- Rendered by JS -->
+  </div>
+</div>
+
+<!-- ═══════════════════ ANALYTICS TAB ═══════════════════ -->
+<div id="view-analytics" class="tab-view hidden">
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <div class="bg-white rounded-2xl shadow p-4">
+      <h3 class="font-semibold text-gray-700 mb-3 text-sm">Score Distribution</h3>
+      <canvas id="chart-scores" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4">
+      <h3 class="font-semibold text-gray-700 mb-3 text-sm">Pipeline Funnel</h3>
+      <canvas id="chart-funnel" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4">
+      <h3 class="font-semibold text-gray-700 mb-3 text-sm">Revenue Band Mix</h3>
+      <canvas id="chart-revenue" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4 md:col-span-2">
+      <h3 class="font-semibold text-gray-700 mb-3 text-sm">Targets by State (Top 15)</h3>
+      <canvas id="chart-states" height="150"></canvas>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4">
+      <h3 class="font-semibold text-gray-700 mb-3 text-sm">Priority Tier Breakdown</h3>
+      <canvas id="chart-tiers" height="200"></canvas>
+    </div>
+  </div>
+</div>
+
+</div><!-- /max-w -->
+
+<!-- ═══════════════════ DETAIL PANEL ═══════════════════ -->
+<div id="panel-overlay" onclick="closePanel()"></div>
+<div id="detail-panel">
+  <div class="p-5" id="panel-content"><!-- JS rendered --></div>
+</div>
+
+<!-- ═══════════════════ ADD TARGET MODAL ═══════════════════ -->
+<div id="add-modal" class="modal-overlay">
+  <div class="modal-box p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold text-gray-800">Add Target Manually</h2>
+      <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+    </div>
+    <form id="add-form" onsubmit="submitAddForm(event)" class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2">
+          <label class="text-xs font-medium text-gray-600">Company Name *</label>
+          <input name="company_name" required class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="MedBill Solutions LLC"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Website</label>
+          <input name="website" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="medbill.com"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Phone</label>
+          <input name="phone" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="+1 312 555 0100"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">City</label>
+          <input name="city" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="Chicago"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">State</label>
+          <input name="state" maxlength="2" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="IL"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Revenue Band</label>
+          <select name="revenue_band" class="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="Unknown">Unknown</option>
+            <option>$1M-$2M</option><option>$2M-$5M</option><option>$5M-$15M</option>
+            <option>$15M-$30M</option><option>$30M-$50M</option><option>$50M+</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Employee Count (est.)</label>
+          <input name="employee_count_est" type="number" min="1" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="25"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Founded Year</label>
+          <input name="founded_year" type="number" min="1980" max="2024" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="2008"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Specialties (comma-sep)</label>
+          <input name="specialties" class="w-full border rounded-lg px-3 py-2 text-sm mt-1" placeholder="physician, multi-specialty"/>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-600">Pipeline Stage</label>
+          <select name="pipeline_stage" class="w-full border rounded-lg px-3 py-2 text-sm mt-1">
+            <option>Prospect</option><option>Researched</option><option>Contacted</option>
+            <option>NDA</option><option>Due Diligence</option><option>LOI</option>
+            <option>Closed</option><option>Dead</option>
+          </select>
+        </div>
+        <div class="col-span-2 flex gap-3">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" name="pe_backed" class="rounded"/> PE Backed
+          </label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" name="offshore_mentions" class="rounded"/> Offshore ops mentioned
+          </label>
+        </div>
+      </div>
+      <div class="flex gap-3 pt-2">
+        <button type="submit" class="bg-teal-700 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-teal-600">Add Target</button>
+        <button type="button" onclick="closeAddModal()" class="border px-5 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════════ IMPORT SUMMARY MODAL ═══════════════════ -->
+<div id="import-modal" class="modal-overlay">
+  <div class="modal-box p-6 text-center">
+    <div class="text-4xl mb-3">✅</div>
+    <h2 class="text-lg font-bold text-gray-800 mb-2">Import Complete</h2>
+    <p id="import-summary" class="text-gray-600 text-sm mb-4"></p>
+    <button onclick="closeImportModal()" class="bg-teal-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-teal-600">Done</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+const STORAGE_KEY = 'vaqya_ma_intelligence_v1';
+let STATE = {
+  targets: [],
+  team_members: ['Mukundan', 'Shanm'],
+  filters: {},
+  ui: { activeTab: 'list', sortCol: 'score', sortDir: 'desc' },
+  version: '1.0.0',
+};
+
+let filteredTargets = [];
+let selectedIds = new Set();
+let openPanelId = null;
+let saveTimer = null;
+
+// Charts
+let charts = {};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSISTENCE
+// ═══════════════════════════════════════════════════════════════════════════
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      STATE = Object.assign(STATE, saved);
+    }
+  } catch(e) { console.warn('State load failed', e); }
+}
+
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+    } catch(e) { console.warn('State save failed', e); }
+  }, 500);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCORING (JS port of scorer.py — for manually added targets)
+// ═══════════════════════════════════════════════════════════════════════════
+const HIGH_COST_STATES   = new Set(['CA','NY','MA','WA','IL','NJ','CT','MD','CO','MN']);
+const MEDIUM_COST_STATES = new Set(['TX','FL','GA','NC','VA','AZ','OH','MI','PA','TN']);
+const VAQYA_STATES       = new Set(['AZ','FL','GA','TX','IL','MO','KY']);
+
+const REVENUE_BAND_SCORES = {
+  '$5M-$15M':22,'$15M-$30M':20,'$30M-$50M':18,'$2M-$5M':16,
+  '$50M+':12,'$1M-$2M':10,'Unknown':10,'<$1M':5
+};
+
+function scoreCompany(c) {
+  const state = (c.state||'').toUpperCase();
+  const age   = c.company_age||0;
+  const rev   = c.estimated_revenue||0;
+  const emp   = c.employee_count_est||0;
+  const specs = (c.specialties||[]).map(s=>s.toLowerCase());
+  const text  = '';
+
+  // Offshoring (max 30)
+  let o = 0;
+  if (HIGH_COST_STATES.has(state)) o += 12;
+  else if (MEDIUM_COST_STATES.has(state)) o += 6;
+  if (!c.offshore_mentions) o += 8; else o -= 8;
+  if (emp>0 && rev>0 && (rev/emp)<120000) o += 6;
+  if (age>=15) o += 4;
+  if ((c.job_posting_count||0)>=2) o += 4;
+  if (!c.multi_state) o += 3;
+  if (c.pe_backed) o -= 5;
+  o = Math.max(0, Math.min(30, o));
+
+  // Automation (max 25)
+  let a = 0;
+  const techSignals = (c.technology_signals||[]).join(' ').toLowerCase();
+  const legacyKws = ['meditech','mckesson','lytec','paper claims','paper eob','fax claims','manual entry'];
+  if (legacyKws.some(k=>techSignals.includes(k))) a += 8;
+  if (age>=20) a += 6; else if (age>=10) a += 4;
+  if ((c.job_posting_count||0)>=2) a += 5;
+  if (specs.includes('physician')||specs.includes('multi-specialty')||specs.includes('multi_specialty')) a += 4;
+  a = Math.max(0, Math.min(25, a));
+
+  // Deal Attractiveness (max 25)
+  let d = REVENUE_BAND_SCORES[c.revenue_band||'Unknown']||10;
+  if (specs.includes('multi-specialty')||specs.includes('multi_specialty')) d += 3;
+  else if (specs.length===1) d -= 2;
+  if (c.multi_state) d += 2;
+  d = Math.max(0, Math.min(25, d));
+
+  // Feasibility (max 20)
+  let f = 0;
+  if ((c.owner_signals||[]).length>0) f += 6;
+  if (age>=15) f += 4;
+  if (!c.pe_backed) f += 4; else f -= 8;
+  if (VAQYA_STATES.has(state)) f += 3;
+  if (!c.recent_funding) f += 3; else f -= 5;
+  if (rev>50000000) f -= 3;
+  f = Math.max(0, Math.min(20, f));
+
+  const composite = Math.min(100, o+a+d+f);
+  const tier = composite>=80?'A':composite>=65?'B':composite>=50?'C':composite>=35?'D':'—';
+  return { composite, offshoring_opportunity:o, automation_opportunity:a,
+           deal_attractiveness:d, acquisition_feasibility:f, priority_tier:tier };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COLOR HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function getScoreColor(score, tier) {
+  if (tier==='A'||score>=80) return { bg:'bg-emerald-100', text:'text-emerald-800', hex:'#059669' };
+  if (tier==='B'||score>=65) return { bg:'bg-blue-100',    text:'text-blue-800',    hex:'#2563eb' };
+  if (tier==='C'||score>=50) return { bg:'bg-yellow-100',  text:'text-yellow-800',  hex:'#d97706' };
+  if (tier==='D'||score>=35) return { bg:'bg-orange-100',  text:'text-orange-800',  hex:'#ea580c' };
+  return { bg:'bg-gray-100', text:'text-gray-500', hex:'#9ca3af' };
+}
+
+const STAGE_CLASSES = {
+  'Prospect':       'bg-gray-100 text-gray-700',
+  'Researched':     'bg-blue-100 text-blue-800',
+  'Contacted':      'bg-purple-100 text-purple-800',
+  'NDA':            'bg-indigo-100 text-indigo-800',
+  'Due Diligence':  'bg-amber-100 text-amber-800',
+  'LOI':            'bg-orange-100 text-orange-800',
+  'Closed':         'bg-emerald-100 text-emerald-800',
+  'Dead':           'bg-red-100 text-red-600',
+};
+
+const PIPELINE_STAGES = ['Prospect','Researched','Contacted','NDA','Due Diligence','LOI','Closed','Dead'];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMPORT
+// ═══════════════════════════════════════════════════════════════════════════
+function triggerImport() {
+  document.getElementById('json-file-input').click();
+}
+
+function handleImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      const incoming = data.targets || (Array.isArray(data) ? data : []);
+      if (!incoming.length) { alert('No targets found in file.'); return; }
+      const { newCount, updatedCount } = mergeTargets(incoming);
+      saveState();
+      renderAll();
+      document.getElementById('import-summary').textContent =
+        `${newCount} new targets added · ${updatedCount} existing targets updated · ${STATE.targets.length} total`;
+      document.getElementById('import-modal').classList.add('open');
+    } catch(err) {
+      alert('Failed to parse JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function mergeTargets(incoming) {
+  let newCount = 0, updatedCount = 0;
+  const existingById     = {};
+  const existingByDomain = {};
+  STATE.targets.forEach(t => {
+    if (t.id) existingById[t.id] = t;
+    const d = normalizeDomain(t.website||'');
+    if (d) existingByDomain[d] = t;
+  });
+
+  const PIPELINE_FIELDS = new Set(['pipeline_stage','assigned_to','priority',
+    'notes','next_action','next_action_due','contacts','date_added']);
+
+  incoming.forEach(inc => {
+    if (!inc.id) inc.id = crypto.randomUUID?.() || generateId();
+    if (!inc.scores) inc.scores = scoreCompany(inc);
+    if (!inc.pipeline_stage) inc.pipeline_stage = 'Prospect';
+
+    // Ensure arrays
+    ['notes','contacts','owner_signals','specialties','technology_signals','job_titles_found','source'].forEach(f => {
+      if (!Array.isArray(inc[f])) inc[f] = [];
+    });
+
+    let match = existingById[inc.id];
+    if (!match) {
+      const d = normalizeDomain(inc.website||'');
+      if (d) match = existingByDomain[d];
+    }
+
+    if (match) {
+      // Update non-pipeline fields
+      for (const [k,v] of Object.entries(inc)) {
+        if (PIPELINE_FIELDS.has(k)) continue;
+        if (v !== null && v !== undefined && v !== '') match[k] = v;
+      }
+      match.date_updated = new Date().toISOString();
+      updatedCount++;
+    } else {
+      inc.date_added    = inc.date_added    || new Date().toISOString();
+      inc.date_updated  = new Date().toISOString();
+      STATE.targets.push(inc);
+      newCount++;
+    }
+  });
+  return { newCount, updatedCount };
+}
+
+function normalizeDomain(url) {
+  if (!url) return '';
+  try {
+    const u = url.startsWith('http') ? new URL(url) : new URL('https://'+url);
+    return u.hostname.replace(/^www\./, '').toLowerCase();
+  } catch { return url.replace(/^(https?:\/\/)?(www\.)?/,'').split('/')[0].toLowerCase(); }
+}
+
+function generateId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0;
+    return (c==='x'?r:(r&0x3|0x8)).toString(16);
+  });
+}
+
+function closeImportModal() {
+  document.getElementById('import-modal').classList.remove('open');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILTERS & SORTING
+// ═══════════════════════════════════════════════════════════════════════════
+function applyFilters() {
+  const search = document.getElementById('filter-search').value.toLowerCase();
+  const state  = document.getElementById('filter-state').value;
+  const metro  = document.getElementById('filter-metro').value;
+  const band   = document.getElementById('filter-band').value;
+  const stage  = document.getElementById('filter-stage').value;
+  const tier   = document.getElementById('filter-tier').value;
+
+  filteredTargets = STATE.targets.filter(t => {
+    if (search && !((t.company_name||'').toLowerCase().includes(search) ||
+                    (t.city||'').toLowerCase().includes(search) ||
+                    (t.metro_region||'').toLowerCase().includes(search))) return false;
+    if (state && t.state !== state) return false;
+    if (metro && t.metro_region !== metro) return false;
+    if (band  && t.revenue_band !== band)  return false;
+    if (stage && t.pipeline_stage !== stage) return false;
+    if (tier  && (t.scores||{}).priority_tier !== tier) return false;
+    return true;
+  });
+
+  sortFiltered();
+  document.getElementById('filter-count').textContent =
+    `${filteredTargets.length} of ${STATE.targets.length}`;
+  renderTable();
+  if (STATE.ui.activeTab === 'pipeline') renderKanban();
+}
+
+function sortFiltered() {
+  const { sortCol, sortDir } = STATE.ui;
+  filteredTargets.sort((a, b) => {
+    let va, vb;
+    if (sortCol === 'score') {
+      va = (a.scores||{}).composite||0;
+      vb = (b.scores||{}).composite||0;
+    } else {
+      va = a[sortCol]||'';
+      vb = b[sortCol]||'';
+    }
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    let cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    return sortDir === 'desc' ? -cmp : cmp;
+  });
+}
+
+function sortBy(col) {
+  if (STATE.ui.sortCol === col) {
+    STATE.ui.sortDir = STATE.ui.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    STATE.ui.sortCol = col;
+    STATE.ui.sortDir = 'desc';
+  }
+  // Update arrow indicators
+  document.querySelectorAll('.sort-arrow').forEach(el => {
+    el.textContent = '↕';
+    el.parentElement.classList.remove('sort-active');
+  });
+  const arrow = document.querySelector(`.sort-arrow[data-col="${col}"]`);
+  if (arrow) {
+    arrow.textContent = STATE.ui.sortDir === 'desc' ? '↓' : '↑';
+    arrow.parentElement.classList.add('sort-active');
+  }
+  applyFilters();
+}
+
+function clearFilters() {
+  ['filter-search','filter-state','filter-metro','filter-band','filter-stage','filter-tier']
+    .forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  applyFilters();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TABLE RENDER
+// ═══════════════════════════════════════════════════════════════════════════
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  const empty = document.getElementById('table-empty');
+  if (!filteredTargets.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  tbody.innerHTML = filteredTargets.map(t => {
+    const scores  = t.scores || {};
+    const sc      = getScoreColor(scores.composite||0, scores.priority_tier);
+    const stageCls= STAGE_CLASSES[t.pipeline_stage]||'bg-gray-100 text-gray-600';
+    const checked = selectedIds.has(t.id) ? 'checked' : '';
+    const specs   = (t.specialties||[]).slice(0,2).join(', ');
+    const empDisp = t.employee_count_est ? `~${t.employee_count_est}` :
+                    (t.employee_count_range||'—');
+
+    return `<tr class="hover:bg-gray-50 cursor-pointer" onclick="openPanel('${t.id}', event)">
+      <td class="px-3 py-2.5" onclick="event.stopPropagation()">
+        <input type="checkbox" ${checked} class="rounded" onchange="toggleSelect('${t.id}', this)"/>
+      </td>
+      <td class="px-3 py-2.5">
+        <div class="font-medium text-gray-800 text-sm leading-tight">${esc(t.company_name||'')}</div>
+        ${t.website ? `<div class="text-xs text-teal-600 truncate max-w-xs">${esc(t.website)}</div>` : ''}
+      </td>
+      <td class="px-3 py-2.5"><span class="text-xs font-semibold bg-gray-100 px-2 py-0.5 rounded">${esc(t.state||'')}</span></td>
+      <td class="px-3 py-2.5 hidden md:table-cell text-sm text-gray-600">${esc(t.metro_region||'—')}</td>
+      <td class="px-3 py-2.5 hidden lg:table-cell text-sm text-gray-600">${esc(t.revenue_band||'Unknown')}</td>
+      <td class="px-3 py-2.5 hidden lg:table-cell text-sm text-gray-600">${esc(empDisp)}</td>
+      <td class="px-3 py-2.5 hidden xl:table-cell text-xs text-gray-500">${esc(specs||'—')}</td>
+      <td class="px-3 py-2.5" onclick="event.stopPropagation()">
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${sc.bg} ${sc.text}">
+          ${scores.priority_tier||'—'} ${scores.composite||0}
+        </span>
+      </td>
+      <td class="px-3 py-2.5" onclick="event.stopPropagation()">
+        <select onchange="updateStage('${t.id}', this.value)" class="stage-badge ${stageCls} border-0 focus:outline-none text-xs rounded-full px-2 py-1 cursor-pointer">
+          ${PIPELINE_STAGES.map(s=>`<option ${s===t.pipeline_stage?'selected':''} value="${s}">${s}</option>`).join('')}
+        </select>
+      </td>
+      <td class="px-3 py-2.5 hidden md:table-cell text-xs text-gray-500">${esc(t.assigned_to||'—')}</td>
+      <td class="px-3 py-2.5 text-right" onclick="event.stopPropagation()">
+        <button onclick="deleteTarget('${t.id}')" class="text-gray-300 hover:text-red-400 text-lg leading-none">&times;</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function esc(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KANBAN BOARD
+// ═══════════════════════════════════════════════════════════════════════════
+function renderKanban() {
+  const container = document.getElementById('kanban-container');
+  const byStage   = {};
+  PIPELINE_STAGES.forEach(s => byStage[s] = []);
+  filteredTargets.forEach(t => {
+    const s = t.pipeline_stage || 'Prospect';
+    if (byStage[s]) byStage[s].push(t);
+  });
+
+  container.innerHTML = PIPELINE_STAGES.map(stage => {
+    const cards = byStage[stage];
+    return `<div class="kanban-col bg-gray-100 rounded-xl flex flex-col"
+              ondragover="event.preventDefault(); this.classList.add('drag-over')"
+              ondragleave="this.classList.remove('drag-over')"
+              ondrop="onKanbanDrop(event, '${stage}')">
+      <div class="kanban-header-${stage} px-3 py-2 rounded-t-xl font-semibold text-xs flex justify-between items-center">
+        <span>${stage}</span>
+        <span class="bg-white bg-opacity-50 rounded-full px-1.5 text-xs">${cards.length}</span>
+      </div>
+      <div class="flex-1 p-2 space-y-2 overflow-y-auto max-h-[70vh]">
+        ${cards.map(t => kanbanCard(t)).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function kanbanCard(t) {
+  const scores = t.scores||{};
+  const sc = getScoreColor(scores.composite||0, scores.priority_tier);
+  const prio = t.priority==='High' ? '🔴' : t.priority==='Medium' ? '🟡' : '';
+  return `<div class="kanban-card bg-white rounded-lg p-2.5 shadow-sm hover:shadow cursor-pointer text-xs"
+            draggable="true"
+            ondragstart="onKanbanDragStart(event, '${t.id}')"
+            onclick="openPanel('${t.id}', event)">
+    <div class="font-semibold text-gray-800 leading-tight mb-1">${prio} ${esc(t.company_name||'')}</div>
+    <div class="flex items-center justify-between">
+      <span class="text-gray-400">${esc(t.state||'')} · ${esc(t.metro_region||'')}</span>
+      <span class="font-bold ${sc.text}">${scores.priority_tier||'—'}${scores.composite||0}</span>
+    </div>
+    <div class="text-gray-400 mt-1">${esc(t.revenue_band||'Unknown')}</div>
+  </div>`;
+}
+
+let dragId = null;
+function onKanbanDragStart(event, id) { dragId = id; event.dataTransfer.effectAllowed = 'move'; }
+function onKanbanDrop(event, newStage) {
+  event.preventDefault();
+  const col = event.currentTarget;
+  col.classList.remove('drag-over');
+  if (!dragId) return;
+  updateStage(dragId, newStage);
+  dragId = null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETAIL PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+function openPanel(id, event) {
+  if (event) event.stopPropagation();
+  openPanelId = id;
+  const t = STATE.targets.find(x => x.id === id);
+  if (!t) return;
+  if (!t.scores) t.scores = scoreCompany(t);
+  renderPanel(t);
+  document.getElementById('detail-panel').classList.add('open');
+  document.getElementById('panel-overlay').classList.add('open');
+}
+
+function closePanel() {
+  openPanelId = null;
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('panel-overlay').classList.remove('open');
+}
+
+function renderPanel(t) {
+  const scores  = t.scores || {};
+  const sc      = getScoreColor(scores.composite||0, scores.priority_tier);
+  const scoreBars = [
+    { label:'Offshoring Opportunity', val:scores.offshoring_opportunity||0, max:30, color:'#0d9488' },
+    { label:'Automation Opportunity',  val:scores.automation_opportunity||0,  max:25, color:'#6366f1' },
+    { label:'Deal Attractiveness',     val:scores.deal_attractiveness||0,     max:25, color:'#f59e0b' },
+    { label:'Acquisition Feasibility', val:scores.acquisition_feasibility||0, max:20, color:'#ec4899' },
+  ];
+
+  const notes = (t.notes||[]).map(n =>
+    `<div class="bg-gray-50 rounded p-2 text-xs">
+      <div class="text-gray-400 mb-0.5">${esc(n.timestamp||'')}</div>
+      <div>${esc(n.text||'')}</div>
+    </div>`
+  ).join('');
+
+  const contacts = (t.contacts||[]).map(c =>
+    `<div class="text-xs border rounded p-2 flex justify-between">
+      <div><div class="font-medium">${esc(c.name||'')}</div><div class="text-gray-400">${esc(c.title||'')} · ${esc(c.email||'')} · ${esc(c.phone||'')}</div></div>
+      <button onclick="removeContact('${t.id}','${c.id||''}')" class="text-gray-300 hover:text-red-400 ml-2">&times;</button>
+    </div>`
+  ).join('');
+
+  const signals = [...(t.technology_signals||[]), ...(t.owner_signals||[])]
+    .filter(Boolean)
+    .map(s => `<span class="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">${esc(s)}</span>`)
+    .join('');
+
+  const specs = (t.specialties||[]).map(s =>
+    `<span class="bg-teal-50 text-teal-700 text-xs px-2 py-0.5 rounded-full">${esc(s)}</span>`
+  ).join('');
+
+  const teamOptions = STATE.team_members.map(m =>
+    `<option ${m===t.assigned_to?'selected':''}>${esc(m)}</option>`
+  ).join('');
+
+  document.getElementById('panel-content').innerHTML = `
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h2 class="font-bold text-lg text-gray-900 leading-tight">${esc(t.company_name||'')}</h2>
+        ${t.website ? `<a href="${t.website.startsWith('http')?'':'https://'}${esc(t.website)}" target="_blank" class="text-teal-600 text-xs hover:underline">${esc(t.website)}</a>` : ''}
+        <div class="flex gap-2 mt-1 flex-wrap">
+          ${t.data_confidence==='high' ? '<span class="bg-green-50 text-green-700 text-xs px-2 py-0.5 rounded-full">High Confidence</span>' : ''}
+          ${(t.source||[]).map(s=>`<span class="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded-full">${esc(s)}</span>`).join('')}
+        </div>
+      </div>
+      <button onclick="closePanel()" class="text-gray-300 hover:text-gray-500 text-2xl leading-none ml-2">&times;</button>
+    </div>
+
+    <!-- Score Breakdown -->
+    <div class="bg-gray-50 rounded-xl p-4 mb-4">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="text-4xl font-black ${sc.text}">${scores.composite||0}</div>
+        <div>
+          <span class="text-2xl font-bold ${sc.text}">Tier ${scores.priority_tier||'—'}</span>
+          <div class="text-xs text-gray-500">${scores.recommended_action||''}</div>
+        </div>
+      </div>
+      ${scoreBars.map(b => `
+        <div class="mb-2">
+          <div class="flex justify-between text-xs mb-1">
+            <span class="text-gray-600">${b.label}</span>
+            <span class="font-semibold">${b.val}<span class="text-gray-400">/${b.max}</span></span>
+          </div>
+          <div class="score-bar-track">
+            <div class="score-bar-fill" style="width:${Math.round(b.val/b.max*100)}%;background:${b.color}"></div>
+          </div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Company Info -->
+    <div class="grid grid-cols-2 gap-2 text-xs mb-4">
+      ${infoRow('City',    t.city)}
+      ${infoRow('State',   t.state)}
+      ${infoRow('Metro',   t.metro_region)}
+      ${infoRow('Phone',   t.phone)}
+      ${infoRow('Founded', t.founded_year)}
+      ${infoRow('Age',     t.company_age ? t.company_age+' yrs' : null)}
+      ${infoRow('Employees', t.employee_count_est ? '~'+t.employee_count_est : t.employee_count_range)}
+      ${infoRow('Revenue', t.revenue_band)}
+      ${infoRow('PE Backed', t.pe_backed ? 'Yes ⚠️' : 'No')}
+      ${infoRow('Offshore', t.offshore_mentions ? 'Mentioned' : 'None detected')}
+    </div>
+
+    ${specs ? `<div class="mb-3"><div class="text-xs font-semibold text-gray-500 mb-1">Specialties</div><div class="flex flex-wrap gap-1">${specs}</div></div>` : ''}
+    ${signals ? `<div class="mb-4"><div class="text-xs font-semibold text-gray-500 mb-1">Signals</div><div class="flex flex-wrap gap-1">${signals}</div></div>` : ''}
+
+    <!-- Pipeline -->
+    <div class="border rounded-xl p-3 mb-4 space-y-2">
+      <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Pipeline</div>
+      <div>
+        <label class="text-xs text-gray-500">Stage</label>
+        <select onchange="updateStage('${t.id}', this.value)" class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5">
+          ${PIPELINE_STAGES.map(s=>`<option ${s===t.pipeline_stage?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Priority</label>
+        <div class="flex gap-2 mt-1">
+          ${['High','Medium','Low'].map(p=>`
+            <label class="flex items-center gap-1 text-xs cursor-pointer">
+              <input type="radio" name="priority-${t.id}" value="${p}" ${t.priority===p?'checked':''} onchange="updateField('${t.id}','priority','${p}')"/>
+              ${p}
+            </label>`).join('')}
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Assigned To</label>
+        <select onchange="updateField('${t.id}','assigned_to',this.value)" class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5">
+          <option value="">— Unassigned —</option>
+          ${teamOptions}
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-gray-500">Next Action</label>
+          <input type="text" value="${esc(t.next_action||'')}" onblur="updateField('${t.id}','next_action',this.value)"
+            class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5" placeholder="Send intro email"/>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">Due Date</label>
+          <input type="date" value="${esc(t.next_action_due||'')}" onchange="updateField('${t.id}','next_action_due',this.value)"
+            class="w-full border rounded-lg px-2 py-1.5 text-sm mt-0.5"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contacts -->
+    <div class="border rounded-xl p-3 mb-4">
+      <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Contacts</div>
+      <div class="space-y-2 mb-2">${contacts||'<div class="text-xs text-gray-400">No contacts yet.</div>'}</div>
+      <div class="grid grid-cols-2 gap-1 mt-2" id="contact-form-${t.id}">
+        <input id="cn-name-${t.id}"  class="border rounded px-2 py-1 text-xs" placeholder="Name"/>
+        <input id="cn-title-${t.id}" class="border rounded px-2 py-1 text-xs" placeholder="Title"/>
+        <input id="cn-email-${t.id}" class="border rounded px-2 py-1 text-xs" placeholder="Email"/>
+        <input id="cn-phone-${t.id}" class="border rounded px-2 py-1 text-xs" placeholder="Phone"/>
+      </div>
+      <button onclick="addContact('${t.id}')" class="mt-2 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 px-3 py-1.5 rounded-lg">+ Add Contact</button>
+    </div>
+
+    <!-- Notes -->
+    <div class="border rounded-xl p-3">
+      <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Notes</div>
+      <div class="space-y-2 mb-2">${notes||'<div class="text-xs text-gray-400">No notes yet.</div>'}</div>
+      <textarea id="note-input-${t.id}" rows="2" class="w-full border rounded-lg px-2 py-1.5 text-xs mt-1" placeholder="Add a note..."></textarea>
+      <button onclick="addNote('${t.id}')" class="mt-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 px-3 py-1.5 rounded-lg">+ Save Note</button>
+    </div>
+  `;
+}
+
+function infoRow(label, val) {
+  if (!val) return '';
+  return `<div><span class="text-gray-400">${label}:</span> <span class="font-medium text-gray-700">${esc(val)}</span></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MUTATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+function updateStage(id, stage) {
+  const t = STATE.targets.find(x => x.id === id);
+  if (!t) return;
+  t.pipeline_stage = stage;
+  t.date_updated   = new Date().toISOString();
+  saveState();
+  applyFilters();
+  refreshStats();
+  if (openPanelId === id) renderPanel(t);
+}
+
+function updateField(id, field, value) {
+  const t = STATE.targets.find(x => x.id === id);
+  if (!t) return;
+  t[field] = value;
+  t.date_updated = new Date().toISOString();
+  saveState();
+  applyFilters();
+}
+
+function addNote(id) {
+  const t    = STATE.targets.find(x => x.id === id);
+  const area = document.getElementById(`note-input-${id}`);
+  if (!t || !area || !area.value.trim()) return;
+  if (!t.notes) t.notes = [];
+  t.notes.unshift({
+    id:        generateId(),
+    text:      area.value.trim(),
+    timestamp: new Date().toLocaleString(),
+  });
+  t.date_updated = new Date().toISOString();
+  area.value = '';
+  saveState();
+  renderPanel(t);
+}
+
+function addContact(id) {
+  const t = STATE.targets.find(x => x.id === id);
+  if (!t) return;
+  const name  = document.getElementById(`cn-name-${id}`)?.value.trim();
+  const title = document.getElementById(`cn-title-${id}`)?.value.trim();
+  const email = document.getElementById(`cn-email-${id}`)?.value.trim();
+  const phone = document.getElementById(`cn-phone-${id}`)?.value.trim();
+  if (!name) return;
+  if (!t.contacts) t.contacts = [];
+  t.contacts.push({ id: generateId(), name, title, email, phone });
+  t.date_updated = new Date().toISOString();
+  saveState();
+  renderPanel(t);
+}
+
+function removeContact(tid, cid) {
+  const t = STATE.targets.find(x => x.id === tid);
+  if (!t) return;
+  t.contacts = (t.contacts||[]).filter(c => c.id !== cid);
+  saveState();
+  renderPanel(t);
+}
+
+function deleteTarget(id) {
+  if (!confirm('Delete this target? Pipeline data will be lost.')) return;
+  STATE.targets = STATE.targets.filter(t => t.id !== id);
+  selectedIds.delete(id);
+  if (openPanelId === id) closePanel();
+  saveState();
+  applyFilters();
+  refreshStats();
+  populateFilterDropdowns();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADD MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+function openAddModal()  { document.getElementById('add-modal').classList.add('open'); }
+function closeAddModal() { document.getElementById('add-modal').classList.remove('open'); }
+
+function submitAddForm(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const now = new Date().toISOString();
+  const foundedYear = parseInt(fd.get('founded_year'))||null;
+  const company = {
+    id:                   generateId(),
+    company_name:         fd.get('company_name'),
+    website:              fd.get('website')||'',
+    phone:                fd.get('phone')||'',
+    address:              '',
+    city:                 fd.get('city')||'',
+    state:                (fd.get('state')||'').toUpperCase(),
+    metro_region:         fd.get('city')||'',
+    zip:                  '',
+    estimated_revenue:    null,
+    revenue_band:         fd.get('revenue_band')||'Unknown',
+    employee_count_range: null,
+    employee_count_est:   parseInt(fd.get('employee_count_est'))||null,
+    founded_year:         foundedYear,
+    company_age:          foundedYear ? new Date().getFullYear()-foundedYear : null,
+    owner_signals:        [],
+    specialties:          (fd.get('specialties')||'').split(',').map(s=>s.trim()).filter(Boolean),
+    technology_signals:   [],
+    pe_backed:            fd.get('pe_backed')==='on',
+    offshore_mentions:    fd.get('offshore_mentions')==='on',
+    multi_state:          false,
+    recent_funding:       false,
+    job_posting_count:    0,
+    job_titles_found:     [],
+    source:               ['manual'],
+    data_confidence:      'low',
+    pipeline_stage:       fd.get('pipeline_stage')||'Prospect',
+    assigned_to:          null,
+    priority:             null,
+    notes:                [],
+    next_action:          null,
+    next_action_due:      null,
+    contacts:             [],
+    date_added:           now,
+    date_updated:         now,
+  };
+  company.scores = scoreCompany(company);
+  STATE.targets.push(company);
+  saveState();
+  applyFilters();
+  refreshStats();
+  populateFilterDropdowns();
+  closeAddModal();
+  e.target.reset();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SELECTION
+// ═══════════════════════════════════════════════════════════════════════════
+function toggleSelect(id, el) {
+  if (el.checked) selectedIds.add(id); else selectedIds.delete(id);
+}
+function toggleSelectAll(el) {
+  filteredTargets.forEach(t => {
+    if (el.checked) selectedIds.add(t.id); else selectedIds.delete(t.id);
+  });
+  renderTable();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════════════════
+function switchTab(tab) {
+  STATE.ui.activeTab = tab;
+  document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(el => {
+    el.classList.remove('border-teal-600', 'text-teal-700', 'font-semibold', 'border-b-2');
+  });
+  document.getElementById(`view-${tab}`).classList.remove('hidden');
+  const btn = document.getElementById(`tab-${tab}`);
+  btn.classList.add('border-teal-600','text-teal-700','font-semibold','border-b-2');
+
+  if (tab === 'pipeline') renderKanban();
+  if (tab === 'analytics') renderCharts();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYTICS CHARTS
+// ═══════════════════════════════════════════════════════════════════════════
+const TEAL_PALETTE = ['#0d9488','#6366f1','#f59e0b','#ec4899','#10b981','#3b82f6','#ef4444','#8b5cf6'];
+
+function destroyChart(key) { if (charts[key]) { charts[key].destroy(); charts[key]=null; } }
+
+function renderCharts() {
+  const targets = filteredTargets.length ? filteredTargets : STATE.targets;
+
+  // Score histogram
+  destroyChart('scores');
+  const scoreBuckets = [0,0,0,0,0]; // 0-20,20-40,40-60,60-80,80-100
+  targets.forEach(t => {
+    const s = (t.scores||{}).composite||0;
+    const b = Math.min(Math.floor(s/20), 4);
+    scoreBuckets[b]++;
+  });
+  charts['scores'] = new Chart(document.getElementById('chart-scores'), {
+    type:'bar',
+    data:{ labels:['0–20','20–40','40–60','60–80','80–100'],
+           datasets:[{ data:scoreBuckets, backgroundColor:TEAL_PALETTE[0], borderRadius:6 }] },
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, ticks:{stepSize:1}} } }
+  });
+
+  // Pipeline funnel
+  destroyChart('funnel');
+  const stageData = PIPELINE_STAGES.map(s => targets.filter(t=>t.pipeline_stage===s).length);
+  charts['funnel'] = new Chart(document.getElementById('chart-funnel'), {
+    type:'bar',
+    data:{ labels:PIPELINE_STAGES,
+           datasets:[{ data:stageData, backgroundColor:TEAL_PALETTE, borderRadius:6 }] },
+    options:{ indexAxis:'y', plugins:{legend:{display:false}},
+              scales:{ x:{beginAtZero:true, ticks:{stepSize:1}} } }
+  });
+
+  // Revenue donut
+  destroyChart('revenue');
+  const bands = ['$5M-$15M','$15M-$30M','$2M-$5M','$30M-$50M','$50M+','$1M-$2M','<$1M','Unknown'];
+  const bandData = bands.map(b => targets.filter(t=>t.revenue_band===b).length);
+  charts['revenue'] = new Chart(document.getElementById('chart-revenue'), {
+    type:'doughnut',
+    data:{ labels:bands, datasets:[{ data:bandData, backgroundColor:TEAL_PALETTE, borderWidth:2 }] },
+    options:{ plugins:{ legend:{ position:'right', labels:{ font:{size:10} } } } }
+  });
+
+  // States bar
+  destroyChart('states');
+  const stateCounts = {};
+  targets.forEach(t => { if(t.state) stateCounts[t.state]=(stateCounts[t.state]||0)+1; });
+  const sorted = Object.entries(stateCounts).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  charts['states'] = new Chart(document.getElementById('chart-states'), {
+    type:'bar',
+    data:{ labels:sorted.map(x=>x[0]),
+           datasets:[{ data:sorted.map(x=>x[1]), backgroundColor:TEAL_PALETTE[0], borderRadius:4 }] },
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, ticks:{stepSize:1}} } }
+  });
+
+  // Priority tiers
+  destroyChart('tiers');
+  const tierLabels = ['A','B','C','D','—'];
+  const tierColors = ['#059669','#2563eb','#d97706','#ea580c','#9ca3af'];
+  const tierData   = tierLabels.map(tier => targets.filter(t=>(t.scores||{}).priority_tier===tier).length);
+  charts['tiers'] = new Chart(document.getElementById('chart-tiers'), {
+    type:'doughnut',
+    data:{ labels:tierLabels.map(t=>`Tier ${t}`),
+           datasets:[{ data:tierData, backgroundColor:tierColors, borderWidth:2 }] },
+    options:{ plugins:{ legend:{ position:'right' } } }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATS BAR
+// ═══════════════════════════════════════════════════════════════════════════
+function refreshStats() {
+  const targets   = STATE.targets;
+  const inPipeline= targets.filter(t => t.pipeline_stage && t.pipeline_stage !== 'Prospect' && t.pipeline_stage !== 'Dead').length;
+  const tierA     = targets.filter(t => (t.scores||{}).priority_tier === 'A').length;
+  const avgScore  = targets.length ? Math.round(targets.reduce((s,t)=>s+((t.scores||{}).composite||0),0)/targets.length) : 0;
+
+  document.getElementById('stat-total').textContent     = targets.length;
+  document.getElementById('stat-pipeline').textContent  = inPipeline;
+  document.getElementById('stat-tier-a').textContent    = tierA;
+  document.getElementById('stat-avg-score').textContent = avgScore || '—';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILTER DROPDOWNS (populate state/metro options)
+// ═══════════════════════════════════════════════════════════════════════════
+function populateFilterDropdowns() {
+  const states = [...new Set(STATE.targets.map(t=>t.state).filter(Boolean))].sort();
+  const metros = [...new Set(STATE.targets.map(t=>t.metro_region).filter(Boolean))].sort();
+
+  const stateEl = document.getElementById('filter-state');
+  const metroEl = document.getElementById('filter-metro');
+  const curState = stateEl.value;
+  const curMetro = metroEl.value;
+
+  stateEl.innerHTML = `<option value="">All States</option>` +
+    states.map(s=>`<option ${s===curState?'selected':''}>${esc(s)}</option>`).join('');
+  metroEl.innerHTML = `<option value="">All Metros</option>` +
+    metros.map(m=>`<option ${m===curMetro?'selected':''}>${esc(m)}</option>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════════════════════════════════════
+function exportCSV() {
+  const targets = filteredTargets.length ? filteredTargets : STATE.targets;
+  const cols = ['company_name','website','phone','city','state','metro_region','revenue_band',
+                'employee_count_est','founded_year','company_age','pipeline_stage','assigned_to',
+                'priority','next_action','next_action_due','pe_backed','offshore_mentions',
+                'specialties','composite_score','tier'];
+
+  const rows = targets.map(t => {
+    const scores = t.scores||{};
+    return cols.map(c => {
+      if (c==='composite_score') return scores.composite||'';
+      if (c==='tier') return scores.priority_tier||'';
+      if (c==='specialties') return (t.specialties||[]).join('; ');
+      const v = t[c];
+      if (v===null||v===undefined) return '';
+      return `"${String(v).replace(/"/g,'""')}"`;
+    }).join(',');
+  });
+
+  const csv = [cols.join(','), ...rows].join('\n');
+  downloadFile(csv, `vaqya-ma-targets-${today()}.csv`, 'text/csv');
+}
+
+function exportJSON() {
+  const output = {
+    exported_at: new Date().toISOString(),
+    total_count: STATE.targets.length,
+    targets: STATE.targets.map(t => {
+      const {_website_text, ...clean} = t;
+      return clean;
+    }),
+  };
+  downloadFile(JSON.stringify(output, null, 2), `vaqya-ma-targets-${today()}.json`, 'application/json');
+}
+
+function downloadFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function today() {
+  return new Date().toISOString().slice(0,10);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+function renderAll() {
+  populateFilterDropdowns();
+  applyFilters();
+  refreshStats();
+  if (STATE.ui.activeTab === 'pipeline') renderKanban();
+  if (STATE.ui.activeTab === 'analytics') renderCharts();
+}
+
+(function init() {
+  loadState();
+  switchTab(STATE.ui.activeTab || 'list');
+  renderAll();
+})();
+</script>
+</body>
+</html>

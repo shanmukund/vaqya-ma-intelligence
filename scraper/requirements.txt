@@ -1,0 +1,8 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+playwright>=1.40.0
+googlemaps>=4.10.0
+serpapi>=0.1.5
+tenacity>=8.2.3
+fake-useragent>=1.4.0
+tldextract>=5.1.1

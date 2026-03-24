@@ -1,0 +1,13 @@
+scraper/rcm_targets.json
+scraper/__pycache__/
+scraper/sources/__pycache__/
+scraper/enrichment/__pycache__/
+scraper/scoring/__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
+venv/
+.venv/
+node_modules/
+*.log

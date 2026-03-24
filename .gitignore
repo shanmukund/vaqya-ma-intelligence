@@ -1,4 +1,5 @@
-scraper/rcm_targets.json
+# rcm_targets.json is intentionally tracked — updated by GitHub Actions scraper
+# scraper/rcm_targets.json
 scraper/__pycache__/
 scraper/sources/__pycache__/
 scraper/enrichment/__pycache__/

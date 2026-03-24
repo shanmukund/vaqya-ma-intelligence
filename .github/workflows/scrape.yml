@@ -1,0 +1,128 @@
+name: RCM Target Scraper
+
+on:
+  # Run every Monday at 6 AM UTC (1 AM EST)
+  schedule:
+    - cron: '0 6 * * 1'
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: 'Comma-separated sources (google_maps,indeed,sos,linkedin,bing,hfma_mgma)'
+        required: false
+        default: 'google_maps,indeed,sos,bing,hfma_mgma'
+      metros:
+        description: 'Comma-separated metro names to limit scope (blank = all 47)'
+        required: false
+        default: ''
+      tech_scan:
+        description: 'Run website tech signal detection (slow but adds signals)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    permissions:
+      contents: write   # needed to commit rcm_targets.json back
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python setup ────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: scraper/requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install -r scraper/requirements.txt
+
+      - name: Install Playwright browsers
+        run: python -m playwright install chromium --with-deps
+
+      # ── 3. Run scraper ─────────────────────────────────────────────────────
+      - name: Run RCM target scraper
+        working-directory: scraper
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          BING_MAPS_API_KEY:   ${{ secrets.BING_MAPS_API_KEY }}
+          SERPAPI_KEY:         ${{ secrets.SERPAPI_KEY }}
+        run: |
+          SOURCES="${{ github.event.inputs.sources || 'google_maps,indeed,sos,bing,hfma_mgma' }}"
+          METROS="${{ github.event.inputs.metros || '' }}"
+          TECH="${{ github.event.inputs.tech_scan || 'false' }}"
+
+          CMD="python scrape_rcm_targets.py --sources $SOURCES"
+          if [ -n "$METROS" ]; then CMD="$CMD --metros \"$METROS\""; fi
+          if [ "$TECH" = "false" ]; then CMD="$CMD --no-tech-scan"; fi
+
+          echo "Running: $CMD"
+          eval $CMD
+
+      # ── 4. Copy output to root for GitHub Pages ────────────────────────────
+      - name: Copy rcm_targets.json to repo root
+        run: |
+          if [ -f scraper/rcm_targets.json ]; then
+            cp scraper/rcm_targets.json rcm_targets.json
+            echo "Copied rcm_targets.json to root"
+          else
+            echo "No rcm_targets.json produced — skipping copy"
+          fi
+
+      # ── 5. Commit results ──────────────────────────────────────────────────
+      - name: Commit and push scraper output
+        run: |
+          git config user.name  "Vaqya Scraper Bot"
+          git config user.email "scraper@vaqya.com"
+
+          git add scraper/rcm_targets.json rcm_targets.json 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit — scraper produced no new data."
+          else
+            COUNT=$(python -c "
+          import json, sys
+          try:
+            data = json.load(open('scraper/rcm_targets.json'))
+            print(data.get('total_count', 0))
+          except:
+            print('unknown')
+          ")
+            git commit -m "scraper: update rcm_targets.json — $COUNT targets [$(date -u '+%Y-%m-%d')]"
+            git push origin main
+            echo "Pushed updated rcm_targets.json ($COUNT targets)"
+          fi
+
+      # ── 6. Summary ─────────────────────────────────────────────────────────
+      - name: Scrape summary
+        if: always()
+        run: |
+          if [ -f scraper/rcm_targets.json ]; then
+            python -c "
+          import json
+          data = json.load(open('scraper/rcm_targets.json'))
+          targets = data.get('targets', [])
+          tiers = {}
+          for t in targets:
+            tier = (t.get('scores') or {}).get('priority_tier', '-')
+            tiers[tier] = tiers.get(tier, 0) + 1
+          print(f'Total targets: {len(targets)}')
+          for tier in ['A','B','C','D','-']:
+            if tier in tiers:
+              print(f'  Tier {tier}: {tiers[tier]}')
+          "
+          else
+            echo "No output file found."
+          fi

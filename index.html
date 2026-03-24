@@ -95,8 +95,12 @@
       <button onclick="exportJSON()" class="bg-teal-700 hover:bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium">
         ↓ JSON
       </button>
+      <button onclick="autoSync()" id="sync-btn" class="bg-teal-700 hover:bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1" title="Fetch latest scraped data from server">
+        ⟳ Sync
+      </button>
     </div>
   </div>
+  <div id="sync-banner" class="hidden bg-teal-700 text-teal-100 text-xs text-center py-1 px-4"></div>
   <input type="file" id="json-file-input" accept=".json" class="hidden" onchange="handleImport(event)"/>
 </header>
 
@@ -1223,10 +1227,63 @@ function renderAll() {
   if (STATE.ui.activeTab === 'analytics') renderCharts();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-SYNC (fetch rcm_targets.json from server / GitHub Pages)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Where to fetch the latest scraped data.
+// Works on GitHub Pages (same origin) and local file:// (will fail gracefully).
+const DATA_URL = (() => {
+  const base = window.location.href.replace(/\/[^/]*$/, '/');
+  // If served from /dashboard/ subfolder, go up one level
+  if (base.endsWith('/dashboard/')) return base.replace('/dashboard/', '/') + 'rcm_targets.json';
+  return base + 'rcm_targets.json';
+})();
+
+function showSyncBanner(msg, isError) {
+  const el = document.getElementById('sync-banner');
+  el.textContent = msg;
+  el.className = `${isError ? 'bg-red-700 text-red-100' : 'bg-teal-700 text-teal-100'} text-xs text-center py-1 px-4`;
+  el.classList.remove('hidden');
+  if (!isError) setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+async function autoSync(silent) {
+  const btn = document.getElementById('sync-btn');
+  if (btn) { btn.textContent = '⟳ Syncing…'; btn.disabled = true; }
+  try {
+    const res = await fetch(DATA_URL + '?t=' + Date.now());
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const incoming = data.targets || [];
+    if (!incoming.length) { showSyncBanner('No targets in server data yet.', false); return; }
+    const { newCount, updatedCount } = mergeTargets(incoming);
+    // Record sync time
+    STATE.last_sync = new Date().toISOString();
+    STATE.last_sync_count = incoming.length;
+    saveState();
+    renderAll();
+    if (!silent || newCount > 0 || updatedCount > 0) {
+      showSyncBanner(
+        `Synced ${incoming.length} targets — ${newCount} new · ${updatedCount} updated · last run: ${data.generated_at ? new Date(data.generated_at).toLocaleDateString() : 'unknown'}`,
+        false
+      );
+    }
+  } catch (err) {
+    if (!silent) showSyncBanner(`Sync failed: ${err.message}. Use Import JSON for local files.`, true);
+  } finally {
+    if (btn) { btn.textContent = '⟳ Sync'; btn.disabled = false; }
+  }
+}
+
 (function init() {
   loadState();
   switchTab(STATE.ui.activeTab || 'list');
   renderAll();
+  // Auto-sync on load if served over HTTP (not file://)
+  if (window.location.protocol !== 'file:') {
+    autoSync(true);
+  }
 })();
 </script>
 </body>

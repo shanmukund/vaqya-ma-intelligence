@@ -51,7 +51,7 @@ from enrichment.revenue_estimator import estimate_revenue
 from enrichment.tech_detector  import detect_all
 from scoring.scorer            import score_all
 
-from config import OUTPUT_FILE, TARGET_METROS, BRAVE_API_KEY
+from config import OUTPUT_FILE, TARGET_METROS, TIER2_METROS, BRAVE_API_KEY, SEARCHAPI_KEY
 
 # ── Source tiers ───────────────────────────────────────────────────────────────
 # Phase 1 — fully free (active now)
@@ -63,13 +63,19 @@ PAID_SOURCES = ["google_maps"]
 
 def _default_sources() -> list[str]:
     """
-    Build the default source list for this run — always all FREE_SOURCES.
-    Brave API key upgrades LinkedIn URL discovery internally (no extra source entry).
+    Build the default source list for this run.
+    - Always includes all FREE_SOURCES.
+    - Adds google_maps automatically if SEARCHAPI_KEY is set.
+    - Brave key upgrades LinkedIn URL discovery internally (no extra source entry).
     """
     sources = list(FREE_SOURCES)
     if BRAVE_API_KEY:
         print("[main] BRAVE_API_KEY detected — LinkedIn will use Brave Search API "
               "($5 free credits/mo = 1,000 requests/mo)")
+    if SEARCHAPI_KEY and SEARCHAPI_KEY != "YOUR_SEARCHAPI_KEY":
+        sources.append("google_maps")
+        print("[main] SEARCHAPI_KEY detected — Google Maps (tier-2 metros) ENABLED "
+              "(100 lifetime free credits → use sparingly)")
     return sources
 
 
@@ -194,11 +200,14 @@ def run(
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
-    # ── OPTIONAL PAID SOURCES ─────────────────────────────────────────────────
+    # ── SEARCHAPI GOOGLE MAPS (free 100 lifetime credits) ─────────────────────
     if "google_maps" in sources:
         step += 1
-        print(f"\n[{step}] Google Places API (PAID — $48/full run, optional)...")
-        results = google_maps.scrape(metros=metros)
+        print(f"\n[{step}] Google Maps via SearchAPI.io (100 free lifetime credits)...")
+        print(f"      Targeting tier-2 metros — owner-operated, lower PE competition")
+        # Use caller-specified metros if given, else default to TIER2_METROS
+        gm_metros = metros if metros is not None else None
+        results = google_maps.scrape(metros=gm_metros)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 

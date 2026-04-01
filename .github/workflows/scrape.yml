@@ -10,13 +10,13 @@ on:
     inputs:
       sources:
         description: |
-          Sources to run (blank = auto: free + Bing/Brave if keys are set).
-          Options: nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin,bing
-          Phase 2 paid (add manually): google_maps
+          Sources to run (blank = auto: free + any keys detected).
+          Options: nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin,google_maps
+          google_maps uses SearchAPI.io (100 free lifetime credits — use sparingly!)
         required: false
         default: ''
       metros:
-        description: 'Comma-separated metro names to limit scope (blank = all 47)'
+        description: 'Comma-separated metro names to limit scope (blank = tier-2 auto)'
         required: false
         default: ''
       tech_scan:
@@ -60,20 +60,27 @@ jobs:
         run: |
           echo "=== Active API keys this run ==="
           if [ -n "${{ secrets.BRAVE_API_KEY }}" ]; then
-            echo "  ✅ BRAVE_API_KEY  — Brave Search (\$5/1K, \$5 free credit/mo) — ACTIVE"
-            echo "                     LinkedIn upgraded: Brave → DuckDuckGo fallback"
+            echo "  ✅ BRAVE_API_KEY   — Brave Search (\$5/1K, \$5 free credit/mo) — ACTIVE"
+            echo "                      LinkedIn upgraded: Brave → DuckDuckGo fallback"
           else
-            echo "  ⬜ BRAVE_API_KEY  — not set → LinkedIn uses DuckDuckGo (always free)"
-            echo "                     Optional: brave.com/search/api (\$5 free credits/mo)"
+            echo "  ⬜ BRAVE_API_KEY   — not set → LinkedIn uses DuckDuckGo (always free)"
+            echo "                      Optional: brave.com/search/api (\$5 free credits/mo)"
+          fi
+          if [ -n "${{ secrets.SEARCHAPI_KEY }}" ]; then
+            echo "  ✅ SEARCHAPI_KEY   — SearchAPI.io Google Maps (tier-2 metros) — ACTIVE"
+            echo "                      ⚠️  100 LIFETIME credits — use sparingly!"
+          else
+            echo "  ⬜ SEARCHAPI_KEY   — not set → Google Maps skipped"
+            echo "                      Get 100 free credits: searchapi.io"
           fi
           echo "  ── Phase 2 paid (not active yet) ──"
           if [ -n "${{ secrets.SERPAPI_KEY }}" ]; then
-            echo "  ✅ SERPAPI_KEY        — SerpAPI (paid) — ACTIVE"
+            echo "  ✅ SERPAPI_KEY         — SerpAPI (paid) — ACTIVE"
           else
-            echo "  ⬜ SERPAPI_KEY        — Phase 2 paid"
+            echo "  ⬜ SERPAPI_KEY         — Phase 2 paid"
           fi
           if [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]; then
-            echo "  ✅ GOOGLE_MAPS_API_KEY — Google Maps (paid) — ACTIVE"
+            echo "  ✅ GOOGLE_MAPS_API_KEY — Google Places API (paid) — ACTIVE"
           else
             echo "  ⬜ GOOGLE_MAPS_API_KEY — Phase 2 paid"
           fi
@@ -82,8 +89,10 @@ jobs:
       - name: Run RCM target scraper
         working-directory: scraper
         env:
-          # ── Low-cost key ($5 free credits/mo auto-applied) ───────────────
+          # ── Free monthly credits ($5/mo auto-applied) ─────────────────────
           BRAVE_API_KEY:       ${{ secrets.BRAVE_API_KEY }}
+          # ── Free lifetime credits (100 total — use sparingly!) ────────────
+          SEARCHAPI_KEY:       ${{ secrets.SEARCHAPI_KEY }}
           # ── Phase 2 paid keys (leave blank until Phase 2) ─────────────────
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           SERPAPI_KEY:         ${{ secrets.SERPAPI_KEY }}
@@ -134,8 +143,9 @@ jobs:
             # Note which keys were active in commit message
             KEYS=""
             [ -n "${{ secrets.BRAVE_API_KEY }}" ]        && KEYS="${KEYS}brave,"
-            [ -n "${{ secrets.SERPAPI_KEY }}" ]          && KEYS="${KEYS}serpapi,"
-            [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]  && KEYS="${KEYS}gmaps,"
+            [ -n "${{ secrets.SEARCHAPI_KEY }}" ]         && KEYS="${KEYS}searchapi,"
+            [ -n "${{ secrets.SERPAPI_KEY }}" ]           && KEYS="${KEYS}serpapi,"
+            [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]   && KEYS="${KEYS}gmaps,"
             KEYS="${KEYS:-free-only}"
 
             git commit -m "scraper: $COUNT targets [$(date -u '+%Y-%m-%d')] keys:${KEYS%,}"

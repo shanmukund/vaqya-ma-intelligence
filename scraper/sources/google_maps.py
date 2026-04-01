@@ -1,65 +1,115 @@
 """
-Google Places API scraper — highest yield source for RCM companies.
+SearchAPI.io — Google Maps Local Search scraper.
 
-For each target metro + each search query, pages through Google Places
-text search results and returns normalized company dicts.
+Free tier: 100 lifetime credits (one-time on signup, no card required).
+Sign up:   https://www.searchapi.io/
+Docs:      https://www.searchapi.io/docs/google-maps
 
-Requires: GOOGLE_MAPS_API_KEY in config.py or environment.
-Cost estimate: ~$0.032/request × ~1,500 requests = ~$48 per full run.
+Strategy — why tier 2 metros:
+  Major metros (NY, LA, Chicago, etc.) are dominated by PE-backed roll-ups
+  and large national RCM firms — expensive and hard to acquire.
+  Tier 2 cities have far more owner-operated shops, lower valuations,
+  and founders actively looking for exits. This is where Vaqya's
+  offshoring + automation value proposition wins.
+
+Credit math:
+  100 lifetime free credits
+  4 queries × 25 tier-2 metros = 100 calls → one complete tier-2 sweep
+  Hard run cap: 95 (keeps 5-credit safety buffer)
+
+Each call returns up to 20 local business listings with:
+  name, phone, website, address, rating, review count, business type
 """
 
 from __future__ import annotations
 import time
 import uuid
 import random
+import requests
 from datetime import datetime, timezone
-from typing import Generator
-import googlemaps
-from googlemaps.exceptions import ApiError, HTTPError, TransportError
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_QUERIES, TARGET_METROS, RATE_LIMITS
+from config import SEARCHAPI_KEY, TIER2_METROS, RATE_LIMITS, FREE_TIER_CAPS
 
-_DELAY = RATE_LIMITS["google_maps"]["delay_seconds"]
-_DAILY_CAP = RATE_LIMITS["google_maps"]["daily_cap"]
+_DELAY   = RATE_LIMITS["google_maps"]["delay_seconds"]
+_RUN_CAP = FREE_TIER_CAPS["searchapi"]["run_cap"]
+
+SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
+
+# 4 focused queries — highest RCM company density per credit spent
+SEARCHAPI_QUERIES = [
+    "medical billing company",
+    "revenue cycle management company",
+    "physician billing services",
+    "healthcare billing services",
+]
+
+# Filter out non-billing businesses that appear in generic searches
+EXCLUDE_NAMES = [
+    "hospital", "health system", "medical center", "urgent care", "clinic",
+    "pharmacy", "laboratory", "radiology group", "insurance company",
+    "staffing", "recruiting", "temp agency",
+]
 
 
-def _build_client() -> googlemaps.Client:
-    if GOOGLE_MAPS_API_KEY == "YOUR_GOOGLE_MAPS_API_KEY":
-        raise ValueError(
-            "Google Maps API key not set. "
-            "Set GOOGLE_MAPS_API_KEY environment variable or update config.py."
-        )
-    return googlemaps.Client(key=GOOGLE_MAPS_API_KEY)
+def _is_relevant(name: str) -> bool:
+    """Keep only RCM / medical billing businesses."""
+    nl = name.lower()
+    if any(ex in nl for ex in EXCLUDE_NAMES):
+        return False
+    return any(kw in nl for kw in [
+        "billing", "rcm", "revenue cycle", "coding", "medical billing",
+        "healthcare billing", "reimbursement", "claims management",
+        "accounts receivable", "denial management",
+    ])
 
 
-def _normalize_result(place: dict, metro: str, state: str) -> dict:
-    """Convert a Google Places result to our standard company dict."""
-    address_components = place.get("formatted_address", "")
-    # Parse city/state/zip from formatted address
-    city = ""
+def _searchapi_maps(query: str, lat: float, lng: float) -> list[dict]:
+    """Single SearchAPI.io Google Maps call — costs 1 credit."""
+    params = {
+        "engine":  "google_maps",
+        "q":       query,
+        "ll":      f"@{lat},{lng},14z",
+        "type":    "search",
+        "api_key": SEARCHAPI_KEY,
+    }
+    try:
+        resp = requests.get(SEARCHAPI_URL, params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("local_results") or []
+    except Exception as e:
+        print(f"  [google_maps] SearchAPI error: {e}")
+        return []
+
+
+def _normalize(item: dict, metro: str, state: str) -> dict:
+    """Convert a SearchAPI Google Maps result to the standard company dict."""
+    now     = datetime.now(timezone.utc).isoformat()
+    address = item.get("address") or ""
+
+    # Parse city/state from "123 Main St, Charlotte, NC 28202, USA"
+    city         = metro
     parsed_state = state
-    zip_code = ""
-    parts = [p.strip() for p in address_components.split(",")]
+    parts = [p.strip() for p in address.split(",")]
     if len(parts) >= 3:
-        city = parts[-3] if len(parts) >= 3 else ""
-        state_zip = parts[-2].strip() if len(parts) >= 2 else ""
-        sz_parts = state_zip.split()
-        if sz_parts:
-            parsed_state = sz_parts[0]
-        if len(sz_parts) > 1:
-            zip_code = sz_parts[1]
+        city = parts[-3].strip()
+    if len(parts) >= 2:
+        state_zip = parts[-2].strip()          # e.g. "NC 28202"
+        sp = state_zip.split()
+        if sp:
+            parsed_state = sp[0][:2].upper()
 
     return {
         "id":                   str(uuid.uuid4()),
-        "company_name":         place.get("name", ""),
-        "website":              place.get("website", ""),
-        "phone":                place.get("formatted_phone_number", ""),
-        "address":              place.get("vicinity", address_components),
+        "company_name":         item.get("title") or "",
+        "website":              item.get("website") or "",
+        "phone":                item.get("phone") or "",
+        "address":              address,
         "city":                 city,
-        "state":                parsed_state.upper()[:2] if parsed_state else state,
+        "state":                parsed_state,
         "metro_region":         metro,
-        "zip":                  zip_code,
+        "zip":                  "",
         "estimated_revenue":    None,
         "revenue_band":         "Unknown",
         "employee_count_range": None,
@@ -76,7 +126,7 @@ def _normalize_result(place: dict, metro: str, state: str) -> dict:
         "job_posting_count":    0,
         "job_titles_found":     [],
         "source":               ["google_maps"],
-        "data_confidence":      "medium",
+        "data_confidence":      "high",
         "pipeline_stage":       "Prospect",
         "assigned_to":          None,
         "priority":             None,
@@ -84,92 +134,43 @@ def _normalize_result(place: dict, metro: str, state: str) -> dict:
         "next_action":          None,
         "next_action_due":      None,
         "contacts":             [],
-        "date_added":           datetime.now(timezone.utc).isoformat(),
-        "date_updated":         datetime.now(timezone.utc).isoformat(),
-        "_google_place_id":     place.get("place_id", ""),
+        "date_added":           now,
+        "date_updated":         now,
+        # Internal enrichment fields
+        "_google_rating":       item.get("rating"),
+        "_google_reviews":      item.get("reviews"),
+        "_google_place_id":     item.get("place_id") or "",
     }
-
-
-def _scrape_metro_query(
-    client: googlemaps.Client,
-    query: str,
-    metro: str,
-    state: str,
-    lat: float,
-    lng: float,
-    request_count: list,
-) -> list[dict]:
-    """Scrape all pages for one (metro, query) pair."""
-    results = []
-    full_query = f"{query} near {metro} {state}"
-
-    try:
-        response = client.places(
-            query=full_query,
-            location=(lat, lng),
-            radius=40_000,  # 40km radius
-            type="establishment",
-        )
-    except (ApiError, HTTPError, TransportError) as e:
-        print(f"  [google_maps] API error for '{full_query}': {e}")
-        return results
-
-    request_count[0] += 1
-
-    while True:
-        for place in response.get("results", []):
-            # Fetch place details for phone + website
-            time.sleep(_DELAY + random.uniform(0, 0.3))
-            request_count[0] += 1
-            if request_count[0] >= _DAILY_CAP:
-                print(f"  [google_maps] Daily cap {_DAILY_CAP} reached.")
-                return results
-            try:
-                details = client.place(
-                    place["place_id"],
-                    fields=["name", "formatted_address", "formatted_phone_number",
-                            "website", "vicinity", "place_id"],
-                )
-                results.append(_normalize_result(details.get("result", place), metro, state))
-            except Exception as e:
-                print(f"  [google_maps] Detail fetch failed: {e}")
-                results.append(_normalize_result(place, metro, state))
-
-        next_token = response.get("next_page_token")
-        if not next_token or request_count[0] >= _DAILY_CAP:
-            break
-        time.sleep(2.5)  # Google requires delay before next_page_token is valid
-        try:
-            response = client.places(page_token=next_token)
-            request_count[0] += 1
-        except Exception as e:
-            print(f"  [google_maps] Pagination error: {e}")
-            break
-
-    return results
 
 
 def scrape(metros: list[dict] | None = None, queries: list[str] | None = None) -> list[dict]:
     """
-    Scrape Google Places for RCM companies across target metros.
+    Scrape Google Maps via SearchAPI.io for RCM companies.
 
-    metros  — subset of TARGET_METROS (default: all)
-    queries — subset of GOOGLE_MAPS_QUERIES (default: all)
+    Defaults to TIER2_METROS (skips major metros dominated by PE-backed firms).
+    Hard cap: 95 calls/run to protect the 100 lifetime free credits.
+
+    metros  — override metro list (default: TIER2_METROS)
+    queries — override queries (default: SEARCHAPI_QUERIES)
     """
-    metros  = metros  or TARGET_METROS
-    queries = queries or GOOGLE_MAPS_QUERIES
-
-    try:
-        client = _build_client()
-    except ValueError as e:
-        print(f"[google_maps] Skipping: {e}")
+    if SEARCHAPI_KEY == "YOUR_SEARCHAPI_KEY":
+        print("[google_maps] SEARCHAPI_KEY not set — skipping.")
+        print("             Get 100 free credits at: https://www.searchapi.io/")
         return []
 
-    all_results: list[dict] = []
-    request_count = [0]  # mutable ref for tracking across calls
+    metros  = metros  or TIER2_METROS
+    queries = queries or SEARCHAPI_QUERIES
 
-    total = len(metros) * len(queries)
-    done  = 0
+    total_possible = len(metros) * len(queries)
+    capped_total   = min(total_possible, _RUN_CAP)
+
+    print(f"[google_maps] SearchAPI.io — {len(metros)} tier-2 metros × "
+          f"{len(queries)} queries = {total_possible} calls planned "
+          f"(hard cap: {_RUN_CAP})")
+    print(f"  Tier 2 focus: owner-operated shops, lower PE competition, better M&A targets")
+
+    all_results: list[dict] = []
+    call_count = 0
 
     for metro_info in metros:
         metro = metro_info["metro"]
@@ -178,18 +179,28 @@ def scrape(metros: list[dict] | None = None, queries: list[str] | None = None) -
         lng   = metro_info["lng"]
 
         for query in queries:
-            done += 1
-            print(f"  [google_maps] {done}/{total} — {query} in {metro}, {state} "
-                  f"(requests: {request_count[0]})")
-
-            if request_count[0] >= _DAILY_CAP:
-                print(f"  [google_maps] Daily cap reached. Stopping.")
+            if call_count >= _RUN_CAP:
+                print(f"  [google_maps] Cap ({_RUN_CAP}) reached — "
+                      f"stopping to protect remaining free credits.")
                 return all_results
 
-            results = _scrape_metro_query(client, query, metro, state, lat, lng, request_count)
-            all_results.extend(results)
-            print(f"    → {len(results)} results (running total: {len(all_results)})")
-            time.sleep(_DELAY)
+            done = call_count + 1
+            print(f"  [google_maps] {done}/{capped_total} — "
+                  f"'{query}' in {metro}, {state} [{call_count}/{_RUN_CAP} credits]")
 
-    print(f"[google_maps] Complete: {len(all_results)} raw results, {request_count[0]} API calls")
+            items = _searchapi_maps(query, lat, lng)
+            call_count += 1
+
+            hits = 0
+            for item in items:
+                name = item.get("title", "")
+                if name and _is_relevant(name):
+                    all_results.append(_normalize(item, metro, state))
+                    hits += 1
+
+            print(f"    → {hits} RCM matches of {len(items)} results")
+            time.sleep(_DELAY + random.uniform(0, 0.5))
+
+    print(f"[google_maps] Complete: {len(all_results)} companies, "
+          f"{call_count} credits used ({100 - call_count} of 100 remaining approx)")
     return all_results

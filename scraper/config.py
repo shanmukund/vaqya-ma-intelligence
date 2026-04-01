@@ -24,13 +24,20 @@ import os
 #                   Actual LinkedIn use: ~20 calls/run × 4 runs = 80/mo ($0.40)
 #                   Upgrades LinkedIn URL discovery quality vs DuckDuckGo
 #
+#  FREE (one-time 100 credits, no card required):
+#    searchapi    — SearchAPI.io Google Maps; 100 lifetime free credits on signup
+#                   4 queries × 25 tier-2 metros = ~100 calls (one full tier-2 run)
+#                   Targets tier 2 cities only (lower PE competition, owner-operated)
+#                   Sign up: https://www.searchapi.io/
+#
 #  OPTIONAL PAID — Phase 2 (gracefully skipped if not set):
-#    google_maps  — ~$48/full run
+#    google_maps  — ~$48/full run via Google Places API directly
 #    serpapi      — ~$50/mo (upgrades LinkedIn to Google SERP, higher volume)
 
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
 SERPAPI_KEY         = os.getenv("SERPAPI_KEY",          "YOUR_SERPAPI_KEY")
 BRAVE_API_KEY       = os.getenv("BRAVE_API_KEY",        "")
+SEARCHAPI_KEY       = os.getenv("SEARCHAPI_KEY",        "YOUR_SEARCHAPI_KEY")
 
 # ─── Output ────────────────────────────────────────────────────────────────────
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "rcm_targets.json")
@@ -225,7 +232,23 @@ FREE_TIER_CAPS = {
         # 20 × 4 runs/mo = 80/mo = $0.40 of $5.00 free credits (8% of budget)
         # 200 cap × 4    = 800/mo = $4.00 of $5.00 free credits (safe ceiling)
     },
+    "searchapi": {
+        "run_cap":       95,        # hard stop — 100 lifetime free credits, keep 5 buffer
+        "total_credits": 100,       # one-time lifetime free credits (no monthly reset)
+        # 4 queries × 25 tier-2 metros = 100 calls = one complete tier-2 run
+        # Run sparingly — credits do NOT renew monthly
+    },
 }
+
+# ─── Tier 2 Metro Areas ────────────────────────────────────────────────────────
+# Excludes the 15 major metros where PE firms dominate and valuations are highest.
+# Tier 2 = owner-operated RCM shops, lower competition, better acquisition targets.
+_TIER1_METRO_NAMES = {
+    "New York", "Los Angeles", "Chicago", "San Francisco", "Boston",
+    "Seattle", "Washington DC", "Minneapolis", "Denver", "Newark",
+    "Miami", "Houston", "Dallas", "Atlanta", "Philadelphia",
+}
+TIER2_METROS = [m for m in TARGET_METROS if m["metro"] not in _TIER1_METRO_NAMES]
 
 # ─── HFMA/MGMA Chapter URLs ────────────────────────────────────────────────────
 HFMA_CHAPTER_BASE = "https://www.hfma.org/chapters/"

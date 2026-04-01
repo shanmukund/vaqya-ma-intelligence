@@ -1,15 +1,23 @@
 """
 LinkedIn public company page scraper (no authentication required).
 
-Strategy (fully free):
-  1. Use DuckDuckGo HTML search (no API key) to find LinkedIn company URLs via
-       site:linkedin.com/company "medical billing"
-  2. Fall back to SerpAPI if SERPAPI_KEY is set (optional, for higher volume)
-  3. Fetch each public LinkedIn company page via Playwright to extract:
-       - Employee count range, Founded year, Specialties, Description
+URL discovery priority (automatic, best available):
+  1. Brave Search API  — free 2,000 queries/month, best quality
+                         ~20 calls/run × 4 runs/month = 80/month (4% of quota)
+                         Sign up: https://brave.com/search/api/
+  2. DuckDuckGo HTML  — always free, no key, no account (fallback)
+  3. SerpAPI          — Phase 2 optional paid upgrade (higher volume)
+
+Then: Playwright fetches each LinkedIn company page to extract
+  employee count range, founded year, specialties, description.
 
 Rate limited to 50 requests/hour (15s delay). LinkedIn blocks aggressively —
 the scraper degrades gracefully and skips blocked pages.
+
+Brave free tier math:
+  4 queries × 5 pages each = ~20 calls/run
+  Weekly runs: 20 × 4 = 80/month of 2,000 free (4% usage)
+  Hard run cap set to 450 to prevent accidental overage.
 """
 
 from __future__ import annotations
@@ -17,14 +25,17 @@ import time
 import uuid
 import random
 import re
+import requests as _requests
 from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SERPAPI_KEY, RATE_LIMITS, TARGET_METROS
+from config import SERPAPI_KEY, BRAVE_API_KEY, RATE_LIMITS, TARGET_METROS, FREE_TIER_CAPS
 
-_DELAY = RATE_LIMITS["linkedin"]["delay_seconds"]
-_HOURLY_CAP = RATE_LIMITS["linkedin"]["hourly_cap"]
+_DELAY       = RATE_LIMITS["linkedin"]["delay_seconds"]
+_HOURLY_CAP  = RATE_LIMITS["linkedin"]["hourly_cap"]
+_BRAVE_CAP   = FREE_TIER_CAPS["brave_search"]["run_cap"]      # calls per run
+_BRAVE_LIMIT = FREE_TIER_CAPS["brave_search"]["monthly_limit"] # for logging
 
 LINKEDIN_SEARCH_QUERIES = [
     'site:linkedin.com/company "medical billing" "United States"',
@@ -32,6 +43,40 @@ LINKEDIN_SEARCH_QUERIES = [
     'site:linkedin.com/company "physician billing" "United States"',
     'site:linkedin.com/company "healthcare billing" "United States"',
 ]
+
+
+def _brave_search(query: str, offset: int = 0, count: int = 20,
+                   call_counter: list | None = None) -> list[dict]:
+    """
+    Brave Search API — free 2,000 queries/month, best quality for LinkedIn discovery.
+    Returns list of {link, title} dicts.
+    call_counter is a mutable [int] for cross-call tracking against the run cap.
+    """
+    if not BRAVE_API_KEY:
+        return []
+    if call_counter is not None and call_counter[0] >= _BRAVE_CAP:
+        print(f"  [linkedin/brave] Run cap ({_BRAVE_CAP}) reached — switching to DuckDuckGo.")
+        return []
+    try:
+        resp = _requests.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": count, "offset": offset},
+            headers={
+                "X-Subscription-Token": BRAVE_API_KEY,
+                "Accept":               "application/json",
+                "Accept-Encoding":      "gzip",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        if call_counter is not None:
+            call_counter[0] += 1
+        data = resp.json()
+        items = (data.get("web") or {}).get("results") or []
+        return [{"link": r.get("url", ""), "title": r.get("title", "")} for r in items]
+    except Exception as e:
+        print(f"  [linkedin/brave] Brave API error: {e}")
+        return []
 
 
 def _ddg_search(query: str, max_results: int = 20) -> list[dict]:
@@ -227,17 +272,54 @@ def _build_company_dict(raw: dict) -> dict:
 def scrape(max_companies: int = 200) -> list[dict]:
     """
     Scrape LinkedIn public company pages.
-    Uses DuckDuckGo (free, no key) by default.
-    Automatically upgrades to SerpAPI if SERPAPI_KEY is set.
-    """
-    using_serpapi = SERPAPI_KEY != "YOUR_SERPAPI_KEY"
-    print(f"[linkedin] URL discovery via {'SerpAPI' if using_serpapi else 'DuckDuckGo (free)'}")
 
-    # Step 1: Collect LinkedIn URLs via SERP (free DDG or paid SerpAPI)
+    URL discovery priority (auto-selected):
+      1. Brave Search API  (BRAVE_API_KEY set — free 2K/mo, best quality)
+      2. DuckDuckGo HTML   (always free, no key, fallback)
+      3. SerpAPI           (SERPAPI_KEY set — Phase 2 paid upgrade)
+    """
+    using_brave   = bool(BRAVE_API_KEY)
+    using_serpapi = SERPAPI_KEY != "YOUR_SERPAPI_KEY"
+
+    if using_brave:
+        mode = "Brave Search API (free 2K/mo)"
+    elif using_serpapi:
+        mode = "SerpAPI (paid)"
+    else:
+        mode = "DuckDuckGo HTML (free, no key)"
+
+    print(f"[linkedin] URL discovery via: {mode}")
+
+    if using_brave:
+        # Log projected monthly usage
+        projected_monthly = len(LINKEDIN_SEARCH_QUERIES) * 5 * 4  # 5 pages/query × 4 runs/mo
+        pct = (projected_monthly / _BRAVE_LIMIT) * 100
+        print(f"  [linkedin/brave] Projected: ~{projected_monthly} calls/month "
+              f"of {_BRAVE_LIMIT} free ({pct:.0f}% quota)")
+
+    brave_counter = [0]   # mutable ref — tracks Brave API calls this run
+
+    # Step 1: Collect LinkedIn URLs
     linkedin_urls: set[str] = set()
+
     for query in LINKEDIN_SEARCH_QUERIES:
-        if using_serpapi:
-            for start in range(0, 50, 10):  # Up to 5 pages per query
+        if using_brave:
+            # Paginate up to 5 pages (20 results each = 100 results per query)
+            for offset in range(0, 100, 20):
+                results = _brave_search(query, offset=offset, count=20,
+                                        call_counter=brave_counter)
+                if not results:
+                    break
+                for r in results:
+                    url = _extract_linkedin_url(r)
+                    if url:
+                        linkedin_urls.add(url)
+                if brave_counter[0] >= _BRAVE_CAP:
+                    break
+                time.sleep(1.0)
+
+        elif using_serpapi:
+            for start in range(0, 50, 10):
                 results = _serpapi_search(query, start)
                 if not results:
                     break
@@ -246,8 +328,9 @@ def scrape(max_companies: int = 200) -> list[dict]:
                     if url:
                         linkedin_urls.add(url)
                 time.sleep(1)
+
         else:
-            # DuckDuckGo returns up to 20 results per call
+            # DuckDuckGo — free, no key, ~20 results per call
             results = _ddg_search(query, max_results=20)
             for r in results:
                 url = _extract_linkedin_url(r)
@@ -257,6 +340,9 @@ def scrape(max_companies: int = 200) -> list[dict]:
 
         if len(linkedin_urls) >= max_companies * 2:
             break
+
+    if using_brave:
+        print(f"  [linkedin/brave] Used {brave_counter[0]} Brave API calls this run")
 
     print(f"[linkedin] Found {len(linkedin_urls)} LinkedIn company URLs to scrape")
 

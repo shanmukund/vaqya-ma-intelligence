@@ -213,6 +213,26 @@ SOS_CONFIGS = {
 
 OPENCORPORATES_BASE = "https://api.opencorporates.com/v0.4/companies/search"
 
+# ─── Free Tier Caps ────────────────────────────────────────────────────────────
+# Hard per-run limits to guarantee we never breach free tier quotas.
+# Designed for weekly automated GitHub Actions runs (52×/year, ~4×/month).
+FREE_TIER_CAPS = {
+    "bing_maps": {
+        "run_cap":      300,        # hard stop per run
+        "annual_limit": 125_000,    # Bing Maps F1 free tier
+        # Actual use: 47 metros × 4 queries = 188 calls/run
+        # 188 × 52 weeks = 9,776/yr = 7.8% of 125K limit
+        # 300 cap × 52   = 15,600/yr = 12.5% of limit (very safe)
+    },
+    "brave_search": {
+        "run_cap":       450,       # hard stop per run
+        "monthly_limit": 2_000,     # Brave Search API free tier
+        # Actual LinkedIn use: ~4 queries × 5 pages = ~20 calls/run
+        # 20 × 4 runs/mo = 80/mo = 4% of 2,000 limit
+        # 450 cap × 4    = 1,800/mo = 90% ceiling (hard guardrail)
+    },
+}
+
 # ─── HFMA/MGMA Chapter URLs ────────────────────────────────────────────────────
 HFMA_CHAPTER_BASE = "https://www.hfma.org/chapters/"
 MGMA_STATE_CHAPTERS = [

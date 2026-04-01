@@ -9,9 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: 'Sources to run — all free by default (no API keys needed)'
+        description: |
+          Sources to run (blank = auto: free + Bing/Brave if keys are set).
+          Options: nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin,bing
+          Phase 2 paid (add manually): google_maps
         required: false
-        default: 'nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin'
+        default: ''
       metros:
         description: 'Comma-separated metro names to limit scope (blank = all 47)'
         required: false
@@ -52,26 +55,58 @@ jobs:
       - name: Install Playwright browsers
         run: python -m playwright install chromium --with-deps
 
-      # ── 3. Run scraper ─────────────────────────────────────────────────────
+      # ── 3. Show which keys are active ──────────────────────────────────────
+      - name: Show active API keys
+        run: |
+          echo "=== Active API keys this run ==="
+          if [ -n "${{ secrets.BING_MAPS_API_KEY }}" ]; then
+            echo "  ✅ BING_MAPS_API_KEY  — Bing Local (free 125K/yr) — ACTIVE"
+          else
+            echo "  ⬜ BING_MAPS_API_KEY  — not set (get free key at bingmapsportal.com)"
+          fi
+          if [ -n "${{ secrets.BRAVE_API_KEY }}" ]; then
+            echo "  ✅ BRAVE_API_KEY      — Brave Search (free 2K/mo) — ACTIVE"
+          else
+            echo "  ⬜ BRAVE_API_KEY      — not set (get free key at brave.com/search/api)"
+          fi
+          echo "  ── Phase 2 (paid, not active yet) ──"
+          if [ -n "${{ secrets.SERPAPI_KEY }}" ]; then
+            echo "  ✅ SERPAPI_KEY        — SerpAPI (paid) — ACTIVE"
+          else
+            echo "  ⬜ SERPAPI_KEY        — Phase 2 paid"
+          fi
+          if [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]; then
+            echo "  ✅ GOOGLE_MAPS_API_KEY — Google Maps (paid) — ACTIVE"
+          else
+            echo "  ⬜ GOOGLE_MAPS_API_KEY — Phase 2 paid"
+          fi
+
+      # ── 4. Run scraper ─────────────────────────────────────────────────────
       - name: Run RCM target scraper
         working-directory: scraper
         env:
-          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          # ── Free tier keys (add these as GitHub Secrets) ──────────────────
           BING_MAPS_API_KEY:   ${{ secrets.BING_MAPS_API_KEY }}
+          BRAVE_API_KEY:       ${{ secrets.BRAVE_API_KEY }}
+          # ── Phase 2 paid keys (leave blank until Phase 2) ─────────────────
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           SERPAPI_KEY:         ${{ secrets.SERPAPI_KEY }}
         run: |
-          SOURCES="${{ github.event.inputs.sources || 'nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin' }}"
-          METROS="${{ github.event.inputs.metros || '' }}"
+          # If --sources blank, Python auto-detects based on env keys present
+          SOURCES="${{ github.event.inputs.sources }}"
+          METROS="${{ github.event.inputs.metros }}"
           TECH="${{ github.event.inputs.tech_scan || 'false' }}"
 
-          CMD="python scrape_rcm_targets.py --sources $SOURCES"
-          if [ -n "$METROS" ]; then CMD="$CMD --metros \"$METROS\""; fi
+          # Build command — leave --sources out if blank so auto-detect fires
+          CMD="python scrape_rcm_targets.py"
+          if [ -n "$SOURCES" ]; then CMD="$CMD --sources $SOURCES"; fi
+          if [ -n "$METROS" ];  then CMD="$CMD --metros \"$METROS\""; fi
           if [ "$TECH" = "false" ]; then CMD="$CMD --no-tech-scan"; fi
 
           echo "Running: $CMD"
           eval $CMD
 
-      # ── 4. Copy output to root for GitHub Pages ────────────────────────────
+      # ── 5. Copy output to root for GitHub Pages ────────────────────────────
       - name: Copy rcm_targets.json to repo root
         run: |
           if [ -f scraper/rcm_targets.json ]; then
@@ -81,7 +116,7 @@ jobs:
             echo "No rcm_targets.json produced — skipping copy"
           fi
 
-      # ── 5. Commit results ──────────────────────────────────────────────────
+      # ── 6. Commit results ──────────────────────────────────────────────────
       - name: Commit and push scraper output
         run: |
           git config user.name  "Vaqya Scraper Bot"
@@ -100,12 +135,20 @@ jobs:
           except:
             print('unknown')
           ")
-            git commit -m "scraper: update rcm_targets.json — $COUNT targets [$(date -u '+%Y-%m-%d')]"
+            # Note which keys were active in commit message
+            KEYS=""
+            [ -n "${{ secrets.BING_MAPS_API_KEY }}" ]   && KEYS="${KEYS}bing,"
+            [ -n "${{ secrets.BRAVE_API_KEY }}" ]        && KEYS="${KEYS}brave,"
+            [ -n "${{ secrets.SERPAPI_KEY }}" ]          && KEYS="${KEYS}serpapi,"
+            [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]  && KEYS="${KEYS}gmaps,"
+            KEYS="${KEYS:-none}"
+
+            git commit -m "scraper: $COUNT targets [$(date -u '+%Y-%m-%d')] keys:${KEYS%,}"
             git push origin main
             echo "Pushed updated rcm_targets.json ($COUNT targets)"
           fi
 
-      # ── 6. Summary ─────────────────────────────────────────────────────────
+      # ── 7. Summary ─────────────────────────────────────────────────────────
       - name: Scrape summary
         if: always()
         run: |
@@ -114,14 +157,27 @@ jobs:
           import json
           data = json.load(open('scraper/rcm_targets.json'))
           targets = data.get('targets', [])
-          tiers = {}
+          tiers   = {}
+          sources = {}
+          states  = {}
           for t in targets:
             tier = (t.get('scores') or {}).get('priority_tier', '-')
             tiers[tier] = tiers.get(tier, 0) + 1
+            for s in (t.get('source') or []):
+              sources[s] = sources.get(s, 0) + 1
+            st = t.get('state','?')
+            states[st] = states.get(st, 0) + 1
           print(f'Total targets: {len(targets)}')
+          print('Priority tiers:')
           for tier in ['A','B','C','D','-']:
             if tier in tiers:
               print(f'  Tier {tier}: {tiers[tier]}')
+          print('Sources:')
+          for s,c in sorted(sources.items(), key=lambda x:-x[1]):
+            print(f'  {s}: {c}')
+          print('Top states:')
+          for s,c in sorted(states.items(), key=lambda x:-x[1])[:8]:
+            print(f'  {s}: {c}')
           "
           else
             echo "No output file found."

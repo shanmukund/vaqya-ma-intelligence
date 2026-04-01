@@ -49,13 +49,31 @@ from enrichment.revenue_estimator import estimate_revenue
 from enrichment.tech_detector  import detect_all
 from scoring.scorer            import score_all
 
-from config import OUTPUT_FILE, TARGET_METROS
+from config import OUTPUT_FILE, TARGET_METROS, BING_MAPS_API_KEY, BRAVE_API_KEY
 
-# Default run order — free sources first, optional paid sources last
+# ── Source tiers ───────────────────────────────────────────────────────────────
+# Phase 1 — free + free-tier keys (active now)
 ALL_SOURCES    = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma",
-                  "linkedin", "google_maps", "bing"]
+                  "linkedin", "bing", "google_maps"]
 FREE_SOURCES   = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma", "linkedin"]
-PAID_SOURCES   = ["google_maps", "bing"]
+FREE_TIER_KEYS = ["bing"]          # free-tier key required; gracefully skipped if absent
+# Phase 2 — optional paid (not in default run)
+PAID_SOURCES   = ["google_maps"]
+
+def _default_sources() -> list[str]:
+    """
+    Build the default source list for this run:
+    - Always: all FREE_SOURCES
+    - Auto-add Bing if BING_MAPS_API_KEY is set (free 125K/yr)
+    (Brave key upgrades LinkedIn internally — no separate source entry needed)
+    """
+    sources = list(FREE_SOURCES)
+    if BING_MAPS_API_KEY and BING_MAPS_API_KEY != "YOUR_BING_MAPS_API_KEY":
+        sources.append("bing")
+        print("[main] BING_MAPS_API_KEY detected — Bing Local added to run")
+    if BRAVE_API_KEY:
+        print("[main] BRAVE_API_KEY detected — LinkedIn will use Brave Search API")
+    return sources
 
 
 # ─── I/O helpers ──────────────────────────────────────────────────────────────
@@ -267,8 +285,11 @@ def _print_summary(targets: list[dict]) -> None:
 # ─── CLI entry point ──────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(description="Vaqya M&A RCM Target Scraper")
-    parser.add_argument("--sources",      default=",".join(FREE_SOURCES),
-                        help="Comma-separated sources to run")
+    parser.add_argument("--sources",      default="",
+                        help="Comma-separated sources to run. "
+                             "Default: auto (free + any keys detected). "
+                             "Choices: nppes,indeed,sos,yellowpages,clutch,hfma_mgma,"
+                             "linkedin,bing,google_maps")
     parser.add_argument("--metros",       default="",
                         help="Comma-separated metro names to limit scope")
     parser.add_argument("--no-tech-scan", action="store_true",
@@ -277,7 +298,10 @@ def main() -> None:
                         help="Run without writing output file")
     args = parser.parse_args()
 
+    # If no --sources flag given, auto-detect based on keys present
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
+    if not sources:
+        sources = _default_sources()
     metros  = None
     if args.metros:
         metro_names = [m.strip() for m in args.metros.split(",")]

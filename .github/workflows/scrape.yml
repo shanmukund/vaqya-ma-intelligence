@@ -59,17 +59,14 @@ jobs:
       - name: Show active API keys
         run: |
           echo "=== Active API keys this run ==="
-          if [ -n "${{ secrets.BING_MAPS_API_KEY }}" ]; then
-            echo "  ✅ BING_MAPS_API_KEY  — Bing Local (free 125K/yr) — ACTIVE"
-          else
-            echo "  ⬜ BING_MAPS_API_KEY  — not set (get free key at bingmapsportal.com)"
-          fi
           if [ -n "${{ secrets.BRAVE_API_KEY }}" ]; then
-            echo "  ✅ BRAVE_API_KEY      — Brave Search (free 2K/mo) — ACTIVE"
+            echo "  ✅ BRAVE_API_KEY  — Brave Search (\$5/1K, \$5 free credit/mo) — ACTIVE"
+            echo "                     LinkedIn upgraded: Brave → DuckDuckGo fallback"
           else
-            echo "  ⬜ BRAVE_API_KEY      — not set (get free key at brave.com/search/api)"
+            echo "  ⬜ BRAVE_API_KEY  — not set → LinkedIn uses DuckDuckGo (always free)"
+            echo "                     Optional: brave.com/search/api (\$5 free credits/mo)"
           fi
-          echo "  ── Phase 2 (paid, not active yet) ──"
+          echo "  ── Phase 2 paid (not active yet) ──"
           if [ -n "${{ secrets.SERPAPI_KEY }}" ]; then
             echo "  ✅ SERPAPI_KEY        — SerpAPI (paid) — ACTIVE"
           else
@@ -85,8 +82,7 @@ jobs:
       - name: Run RCM target scraper
         working-directory: scraper
         env:
-          # ── Free tier keys (add these as GitHub Secrets) ──────────────────
-          BING_MAPS_API_KEY:   ${{ secrets.BING_MAPS_API_KEY }}
+          # ── Low-cost key ($5 free credits/mo auto-applied) ───────────────
           BRAVE_API_KEY:       ${{ secrets.BRAVE_API_KEY }}
           # ── Phase 2 paid keys (leave blank until Phase 2) ─────────────────
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
@@ -137,11 +133,10 @@ jobs:
           ")
             # Note which keys were active in commit message
             KEYS=""
-            [ -n "${{ secrets.BING_MAPS_API_KEY }}" ]   && KEYS="${KEYS}bing,"
             [ -n "${{ secrets.BRAVE_API_KEY }}" ]        && KEYS="${KEYS}brave,"
             [ -n "${{ secrets.SERPAPI_KEY }}" ]          && KEYS="${KEYS}serpapi,"
             [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]  && KEYS="${KEYS}gmaps,"
-            KEYS="${KEYS:-none}"
+            KEYS="${KEYS:-free-only}"
 
             git commit -m "scraper: $COUNT targets [$(date -u '+%Y-%m-%d')] keys:${KEYS%,}"
             git push origin main

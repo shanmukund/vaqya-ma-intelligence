@@ -2,8 +2,9 @@
 LinkedIn public company page scraper (no authentication required).
 
 URL discovery priority (automatic, best available):
-  1. Brave Search API  — free 2,000 queries/month, best quality
-                         ~20 calls/run × 4 runs/month = 80/month (4% of quota)
+  1. Brave Search API  — $5/1,000 requests; $5 free credits auto-applied every month
+                         = 1,000 free searches/month effectively
+                         Actual use: ~20 calls/run × 4 runs = 80/mo ($0.40 of $5 credit)
                          Sign up: https://brave.com/search/api/
   2. DuckDuckGo HTML  — always free, no key, no account (fallback)
   3. SerpAPI          — Phase 2 optional paid upgrade (higher volume)
@@ -14,10 +15,10 @@ Then: Playwright fetches each LinkedIn company page to extract
 Rate limited to 50 requests/hour (15s delay). LinkedIn blocks aggressively —
 the scraper degrades gracefully and skips blocked pages.
 
-Brave free tier math:
-  4 queries × 5 pages each = ~20 calls/run
-  Weekly runs: 20 × 4 = 80/month of 2,000 free (4% usage)
-  Hard run cap set to 450 to prevent accidental overage.
+Brave cost math:
+  $5/1,000 requests with $5 free credits auto-applied each month.
+  4 queries × 5 pages each = ~20 calls/run × 4 runs/mo = 80 calls/mo = $0.40
+  Hard run cap: 200 calls (800/mo max = $4.00 of $5.00 free credit).
 """
 
 from __future__ import annotations
@@ -291,11 +292,11 @@ def scrape(max_companies: int = 200) -> list[dict]:
     print(f"[linkedin] URL discovery via: {mode}")
 
     if using_brave:
-        # Log projected monthly usage
+        # Log projected monthly cost vs free credit
         projected_monthly = len(LINKEDIN_SEARCH_QUERIES) * 5 * 4  # 5 pages/query × 4 runs/mo
-        pct = (projected_monthly / _BRAVE_LIMIT) * 100
+        projected_cost    = (projected_monthly / 1000) * 5         # $5 per 1,000 requests
         print(f"  [linkedin/brave] Projected: ~{projected_monthly} calls/month "
-              f"of {_BRAVE_LIMIT} free ({pct:.0f}% quota)")
+              f"≈ ${projected_cost:.2f}/mo of $5.00 free monthly credit")
 
     brave_counter = [0]   # mutable ref — tracks Brave API calls this run
 

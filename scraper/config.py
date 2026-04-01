@@ -18,14 +18,17 @@ import os
 #    sos          — FL SunBiz + OpenCorporates free tier
 #    linkedin     — DuckDuckGo URL discovery (free) + Playwright page fetch
 #
-#  OPTIONAL PAID (gracefully skipped if not set):
-#    google_maps  — ~$48/full run (not needed with free sources)
-#    bing_local   — 125K free/yr (set for extra coverage)
+#  LOW-COST (key required, $5 free credits/mo auto-applied):
+#    brave        — $5/1,000 requests; $5 free credits every month auto-applied
+#                   = effectively 1,000 free searches/month
+#                   Actual LinkedIn use: ~20 calls/run × 4 runs = 80/mo ($0.40)
+#                   Upgrades LinkedIn URL discovery quality vs DuckDuckGo
+#
+#  OPTIONAL PAID — Phase 2 (gracefully skipped if not set):
+#    google_maps  — ~$48/full run
 #    serpapi      — ~$50/mo (upgrades LinkedIn to Google SERP, higher volume)
-#    brave        — 2,000 free queries/mo at brave.com/search/api
 
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
-BING_MAPS_API_KEY   = os.getenv("BING_MAPS_API_KEY",   "YOUR_BING_MAPS_API_KEY")
 SERPAPI_KEY         = os.getenv("SERPAPI_KEY",          "YOUR_SERPAPI_KEY")
 BRAVE_API_KEY       = os.getenv("BRAVE_API_KEY",        "")
 
@@ -38,10 +41,8 @@ RATE_LIMITS = {
     "indeed":               {"delay_seconds": 5.0,  "session_cap": 200},
     "secretary_of_state":   {"delay_seconds": 3.0,  "daily_cap": 300},
     "linkedin":             {"delay_seconds": 15.0, "hourly_cap": 50},
-    "bing_local":           {"delay_seconds": 2.0,  "daily_cap": 400},
     "hfma_mgma":            {"delay_seconds": 4.0,  "daily_cap": 100},
     "tech_detector":        {"delay_seconds": 2.0,  "daily_cap": 300},
-    # Free sources
     "nppes":                {"delay_seconds": 1.2,  "daily_cap": 80},
     "clutch":               {"delay_seconds": 4.0,  "daily_cap": 30},
     "yellowpages":          {"delay_seconds": 3.0,  "session_cap": 300},
@@ -217,19 +218,12 @@ OPENCORPORATES_BASE = "https://api.opencorporates.com/v0.4/companies/search"
 # Hard per-run limits to guarantee we never breach free tier quotas.
 # Designed for weekly automated GitHub Actions runs (52×/year, ~4×/month).
 FREE_TIER_CAPS = {
-    "bing_maps": {
-        "run_cap":      300,        # hard stop per run
-        "annual_limit": 125_000,    # Bing Maps F1 free tier
-        # Actual use: 47 metros × 4 queries = 188 calls/run
-        # 188 × 52 weeks = 9,776/yr = 7.8% of 125K limit
-        # 300 cap × 52   = 15,600/yr = 12.5% of limit (very safe)
-    },
     "brave_search": {
-        "run_cap":       450,       # hard stop per run
-        "monthly_limit": 2_000,     # Brave Search API free tier
+        "run_cap":       200,       # hard stop per run — protects monthly credit
+        "monthly_limit": 1_000,     # $5 free credits/mo ÷ $5/1,000 = 1,000 requests/mo
         # Actual LinkedIn use: ~4 queries × 5 pages = ~20 calls/run
-        # 20 × 4 runs/mo = 80/mo = 4% of 2,000 limit
-        # 450 cap × 4    = 1,800/mo = 90% ceiling (hard guardrail)
+        # 20 × 4 runs/mo = 80/mo = $0.40 of $5.00 free credits (8% of budget)
+        # 200 cap × 4    = 800/mo = $4.00 of $5.00 free credits (safe ceiling)
     },
 }
 

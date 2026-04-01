@@ -8,16 +8,18 @@ Usage:
 Options:
     --sources       Comma-separated list of sources to run (default: all free)
                     Choices: nppes, indeed, sos, yellowpages, clutch, hfma_mgma,
-                             linkedin, google_maps, bing
+                             linkedin, google_maps
     --metros        Comma-separated metro names to limit scope (default: all)
     --no-tech-scan  Skip website technology signal detection
     --dry-run       Run without writing output file
 
 FREE sources (no API key needed):
     nppes, indeed, sos, yellowpages, clutch, hfma_mgma, linkedin
+FREE sources (key needed — Brave API free 2K/mo):
+    linkedin URL discovery upgrades automatically when BRAVE_API_KEY is set
 
-OPTIONAL PAID sources (skipped gracefully if no key):
-    google_maps (~$48/run), bing (125K free/yr), linkedin (upgrades via SerpAPI)
+OPTIONAL PAID sources — Phase 2 (skipped gracefully until key added):
+    google_maps (~$48/run), linkedin (higher volume via SerpAPI)
 
 Examples:
     python scrape_rcm_targets.py
@@ -40,8 +42,8 @@ from typing import Any
 # Free (no API key required)
 from sources import nppes, indeed_jobs, secretary_of_state
 from sources import yellowpages, clutch, hfma_mgma, linkedin_public
-# Optional paid (gracefully skipped when key not set)
-from sources import google_maps, bing_local
+# Phase 2 paid (gracefully skipped when key not set)
+from sources import google_maps
 
 # ─── Enrichment + scoring ─────────────────────────────────────────────────────
 from enrichment.deduplicator   import deduplicate
@@ -49,30 +51,25 @@ from enrichment.revenue_estimator import estimate_revenue
 from enrichment.tech_detector  import detect_all
 from scoring.scorer            import score_all
 
-from config import OUTPUT_FILE, TARGET_METROS, BING_MAPS_API_KEY, BRAVE_API_KEY
+from config import OUTPUT_FILE, TARGET_METROS, BRAVE_API_KEY
 
 # ── Source tiers ───────────────────────────────────────────────────────────────
-# Phase 1 — free + free-tier keys (active now)
-ALL_SOURCES    = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma",
-                  "linkedin", "bing", "google_maps"]
-FREE_SOURCES   = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma", "linkedin"]
-FREE_TIER_KEYS = ["bing"]          # free-tier key required; gracefully skipped if absent
-# Phase 2 — optional paid (not in default run)
-PAID_SOURCES   = ["google_maps"]
+# Phase 1 — fully free (active now)
+ALL_SOURCES  = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma",
+                "linkedin", "google_maps"]
+FREE_SOURCES = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma", "linkedin"]
+# Phase 2 — paid (not in default run)
+PAID_SOURCES = ["google_maps"]
 
 def _default_sources() -> list[str]:
     """
-    Build the default source list for this run:
-    - Always: all FREE_SOURCES
-    - Auto-add Bing if BING_MAPS_API_KEY is set (free 125K/yr)
-    (Brave key upgrades LinkedIn internally — no separate source entry needed)
+    Build the default source list for this run — always all FREE_SOURCES.
+    Brave API key upgrades LinkedIn URL discovery internally (no extra source entry).
     """
     sources = list(FREE_SOURCES)
-    if BING_MAPS_API_KEY and BING_MAPS_API_KEY != "YOUR_BING_MAPS_API_KEY":
-        sources.append("bing")
-        print("[main] BING_MAPS_API_KEY detected — Bing Local added to run")
     if BRAVE_API_KEY:
-        print("[main] BRAVE_API_KEY detected — LinkedIn will use Brave Search API")
+        print("[main] BRAVE_API_KEY detected — LinkedIn will use Brave Search API "
+              "($5 free credits/mo = 1,000 requests/mo)")
     return sources
 
 
@@ -205,13 +202,6 @@ def run(
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
-    if "bing" in sources:
-        step += 1
-        print(f"\n[{step}] Bing Local Business (optional — 125K free/yr)...")
-        results = bing_local.scrape(metros=metros)
-        all_raw.extend(results)
-        print(f"      → {len(results)} records")
-
     print(f"\n[main] Total raw records: {len(all_raw)}")
 
     if not all_raw and not existing:
@@ -289,7 +279,7 @@ def main() -> None:
                         help="Comma-separated sources to run. "
                              "Default: auto (free + any keys detected). "
                              "Choices: nppes,indeed,sos,yellowpages,clutch,hfma_mgma,"
-                             "linkedin,bing,google_maps")
+                             "linkedin,google_maps")
     parser.add_argument("--metros",       default="",
                         help="Comma-separated metro names to limit scope")
     parser.add_argument("--no-tech-scan", action="store_true",

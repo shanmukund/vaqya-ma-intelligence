@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: 'Comma-separated sources (google_maps,indeed,sos,linkedin,bing,hfma_mgma)'
+        description: 'Sources to run — all free by default (no API keys needed)'
         required: false
-        default: 'google_maps,indeed,sos,bing,hfma_mgma'
+        default: 'nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin'
       metros:
         description: 'Comma-separated metro names to limit scope (blank = all 47)'
         required: false
@@ -60,7 +60,7 @@ jobs:
           BING_MAPS_API_KEY:   ${{ secrets.BING_MAPS_API_KEY }}
           SERPAPI_KEY:         ${{ secrets.SERPAPI_KEY }}
         run: |
-          SOURCES="${{ github.event.inputs.sources || 'google_maps,indeed,sos,bing,hfma_mgma' }}"
+          SOURCES="${{ github.event.inputs.sources || 'nppes,indeed,sos,yellowpages,clutch,hfma_mgma,linkedin' }}"
           METROS="${{ github.event.inputs.metros || '' }}"
           TECH="${{ github.event.inputs.tech_scan || 'false' }}"
 

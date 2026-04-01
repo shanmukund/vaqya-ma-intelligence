@@ -6,10 +6,28 @@ Edit API keys and adjust weights here before running.
 import os
 
 # ─── API Keys ──────────────────────────────────────────────────────────────────
-# Set as environment variables or replace placeholders here.
+# ALL core sources work with ZERO API keys.
+# Optional paid keys unlock higher volume / supplemental sources.
+#
+#  FREE (no key needed):
+#    nppes        — CMS NPI Registry API, unlimited
+#    yellowpages  — HTML scraping, no key
+#    clutch       — HTML scraping, no key
+#    indeed       — Playwright scraping, no key
+#    hfma_mgma    — Playwright scraping, no key
+#    sos          — FL SunBiz + OpenCorporates free tier
+#    linkedin     — DuckDuckGo URL discovery (free) + Playwright page fetch
+#
+#  OPTIONAL PAID (gracefully skipped if not set):
+#    google_maps  — ~$48/full run (not needed with free sources)
+#    bing_local   — 125K free/yr (set for extra coverage)
+#    serpapi      — ~$50/mo (upgrades LinkedIn to Google SERP, higher volume)
+#    brave        — 2,000 free queries/mo at brave.com/search/api
+
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
 BING_MAPS_API_KEY   = os.getenv("BING_MAPS_API_KEY",   "YOUR_BING_MAPS_API_KEY")
 SERPAPI_KEY         = os.getenv("SERPAPI_KEY",          "YOUR_SERPAPI_KEY")
+BRAVE_API_KEY       = os.getenv("BRAVE_API_KEY",        "")
 
 # ─── Output ────────────────────────────────────────────────────────────────────
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "rcm_targets.json")
@@ -23,6 +41,10 @@ RATE_LIMITS = {
     "bing_local":           {"delay_seconds": 2.0,  "daily_cap": 400},
     "hfma_mgma":            {"delay_seconds": 4.0,  "daily_cap": 100},
     "tech_detector":        {"delay_seconds": 2.0,  "daily_cap": 300},
+    # Free sources
+    "nppes":                {"delay_seconds": 1.2,  "daily_cap": 80},
+    "clutch":               {"delay_seconds": 4.0,  "daily_cap": 30},
+    "yellowpages":          {"delay_seconds": 3.0,  "session_cap": 300},
 }
 
 # ─── State Classifications ─────────────────────────────────────────────────────

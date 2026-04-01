@@ -1,8 +1,17 @@
+# ── Core HTTP + parsing (used by all free sources) ────────────────────────────
 requests>=2.31.0
 beautifulsoup4>=4.12.2
-playwright>=1.40.0
-googlemaps>=4.10.0
-serpapi>=0.1.5
 tenacity>=8.2.3
 fake-useragent>=1.4.0
 tldextract>=5.1.1
+
+# ── Browser automation (Indeed, Clutch, LinkedIn, HFMA/MGMA) ─────────────────
+playwright>=1.40.0
+
+# ── Optional paid source: Google Maps API ─────────────────────────────────────
+# Only needed if GOOGLE_MAPS_API_KEY is set. Safe to remove if not using it.
+googlemaps>=4.10.0
+
+# ── Optional paid source: SerpAPI (LinkedIn high-volume URL discovery) ─────────
+# Only needed if SERPAPI_KEY is set. Falls back to DuckDuckGo if not set.
+serpapi>=0.1.5

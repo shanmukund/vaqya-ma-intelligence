@@ -6,16 +6,23 @@ Usage:
     python scrape_rcm_targets.py [options]
 
 Options:
-    --sources       Comma-separated list of sources to run (default: all)
-                    Choices: google_maps, indeed, sos, linkedin, bing, hfma_mgma
+    --sources       Comma-separated list of sources to run (default: all free)
+                    Choices: nppes, indeed, sos, yellowpages, clutch, hfma_mgma,
+                             linkedin, google_maps, bing
     --metros        Comma-separated metro names to limit scope (default: all)
     --no-tech-scan  Skip website technology signal detection
     --dry-run       Run without writing output file
 
+FREE sources (no API key needed):
+    nppes, indeed, sos, yellowpages, clutch, hfma_mgma, linkedin
+
+OPTIONAL PAID sources (skipped gracefully if no key):
+    google_maps (~$48/run), bing (125K free/yr), linkedin (upgrades via SerpAPI)
+
 Examples:
     python scrape_rcm_targets.py
-    python scrape_rcm_targets.py --sources google_maps,indeed --metros "Chicago,Dallas,Atlanta"
-    python scrape_rcm_targets.py --sources sos --no-tech-scan
+    python scrape_rcm_targets.py --sources nppes,indeed --metros "Chicago,Dallas,Atlanta"
+    python scrape_rcm_targets.py --sources nppes,clutch,yellowpages --no-tech-scan
 
 Output:  scraper/rcm_targets.json
 """
@@ -30,8 +37,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 # ─── Source modules ────────────────────────────────────────────────────────────
-from sources import google_maps, indeed_jobs, secretary_of_state
-from sources import linkedin_public, bing_local, hfma_mgma
+# Free (no API key required)
+from sources import nppes, indeed_jobs, secretary_of_state
+from sources import yellowpages, clutch, hfma_mgma, linkedin_public
+# Optional paid (gracefully skipped when key not set)
+from sources import google_maps, bing_local
 
 # ─── Enrichment + scoring ─────────────────────────────────────────────────────
 from enrichment.deduplicator   import deduplicate
@@ -41,7 +51,11 @@ from scoring.scorer            import score_all
 
 from config import OUTPUT_FILE, TARGET_METROS
 
-ALL_SOURCES = ["google_maps", "indeed", "sos", "linkedin", "bing", "hfma_mgma"]
+# Default run order — free sources first, optional paid sources last
+ALL_SOURCES    = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma",
+                  "linkedin", "google_maps", "bing"]
+FREE_SOURCES   = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma", "linkedin"]
+PAID_SOURCES   = ["google_maps", "bing"]
 
 
 # ─── I/O helpers ──────────────────────────────────────────────────────────────
@@ -113,39 +127,70 @@ def run(
     # Step 2: Run selected scrapers
     all_raw: list[dict] = []
 
-    if "google_maps" in sources:
-        print("\n[1/6] Google Maps API...")
-        results = google_maps.scrape(metros=metros)
+    step = 0
+
+    # ── FREE SOURCES (no key required) ────────────────────────────────────────
+    if "nppes" in sources:
+        step += 1
+        print(f"\n[{step}] NPPES NPI Registry (FREE — CMS government database)...")
+        results = nppes.scrape()
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "indeed" in sources:
-        print("\n[2/6] Indeed Job Postings...")
+        step += 1
+        print(f"\n[{step}] Indeed Job Postings (FREE)...")
         results = indeed_jobs.scrape(metros=metros or TARGET_METROS[:15])
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "sos" in sources:
-        print("\n[3/6] Secretary of State Registries...")
+        step += 1
+        print(f"\n[{step}] Secretary of State Registries (FREE)...")
         results = secretary_of_state.scrape()
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
-    if "linkedin" in sources:
-        print("\n[4/6] LinkedIn Public Pages...")
-        results = linkedin_public.scrape()
+    if "yellowpages" in sources:
+        step += 1
+        print(f"\n[{step}] Yellow Pages Directory (FREE)...")
+        results = yellowpages.scrape(metros=metros)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
-    if "bing" in sources:
-        print("\n[5/6] Bing Local Business...")
-        results = bing_local.scrape(metros=metros)
+    if "clutch" in sources:
+        step += 1
+        print(f"\n[{step}] Clutch.co RCM Directory (FREE — employee + revenue data)...")
+        results = clutch.scrape()
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "hfma_mgma" in sources:
-        print("\n[6/6] HFMA/MGMA Directories...")
+        step += 1
+        print(f"\n[{step}] HFMA/MGMA Chapter Directories (FREE)...")
         results = hfma_mgma.scrape()
+        all_raw.extend(results)
+        print(f"      → {len(results)} records")
+
+    if "linkedin" in sources:
+        step += 1
+        print(f"\n[{step}] LinkedIn Public Pages (FREE via DuckDuckGo, or SerpAPI if key set)...")
+        results = linkedin_public.scrape()
+        all_raw.extend(results)
+        print(f"      → {len(results)} records")
+
+    # ── OPTIONAL PAID SOURCES ─────────────────────────────────────────────────
+    if "google_maps" in sources:
+        step += 1
+        print(f"\n[{step}] Google Places API (PAID — $48/full run, optional)...")
+        results = google_maps.scrape(metros=metros)
+        all_raw.extend(results)
+        print(f"      → {len(results)} records")
+
+    if "bing" in sources:
+        step += 1
+        print(f"\n[{step}] Bing Local Business (optional — 125K free/yr)...")
+        results = bing_local.scrape(metros=metros)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
@@ -222,7 +267,7 @@ def _print_summary(targets: list[dict]) -> None:
 # ─── CLI entry point ──────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(description="Vaqya M&A RCM Target Scraper")
-    parser.add_argument("--sources",      default=",".join(ALL_SOURCES),
+    parser.add_argument("--sources",      default=",".join(FREE_SOURCES),
                         help="Comma-separated sources to run")
     parser.add_argument("--metros",       default="",
                         help="Comma-separated metro names to limit scope")

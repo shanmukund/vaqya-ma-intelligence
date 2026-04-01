@@ -1,13 +1,12 @@
 """
 LinkedIn public company page scraper (no authentication required).
 
-Strategy: Use SerpAPI to find LinkedIn company URLs via
-  site:linkedin.com/company "medical billing"
-then fetch each public LinkedIn company page via Playwright to extract:
-  - Employee count range
-  - Founded year
-  - Specialties
-  - Description (for signal detection)
+Strategy (fully free):
+  1. Use DuckDuckGo HTML search (no API key) to find LinkedIn company URLs via
+       site:linkedin.com/company "medical billing"
+  2. Fall back to SerpAPI if SERPAPI_KEY is set (optional, for higher volume)
+  3. Fetch each public LinkedIn company page via Playwright to extract:
+       - Employee count range, Founded year, Specialties, Description
 
 Rate limited to 50 requests/hour (15s delay). LinkedIn blocks aggressively —
 the scraper degrades gracefully and skips blocked pages.
@@ -35,8 +34,50 @@ LINKEDIN_SEARCH_QUERIES = [
 ]
 
 
+def _ddg_search(query: str, max_results: int = 20) -> list[dict]:
+    """
+    Free DuckDuckGo HTML search — no API key, no account.
+    Posts to https://html.duckduckgo.com/html/ for clean, JS-free results.
+    """
+    import requests as _req
+    from bs4 import BeautifulSoup as _BS
+    try:
+        resp = _req.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": query},
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/121.0.0.0 Safari/537.36"
+                ),
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=15,
+        )
+        soup = _BS(resp.text, "html.parser")
+        results = []
+        for r in soup.select(".result")[:max_results]:
+            link_el  = r.select_one(".result__url")
+            title_el = r.select_one(".result__title")
+            if not link_el:
+                continue
+            href = link_el.get_text(strip=True)
+            if not href.startswith("http"):
+                href = "https://" + href
+            results.append({
+                "link":  href,
+                "title": title_el.get_text(strip=True) if title_el else "",
+            })
+        return results
+    except Exception as e:
+        print(f"  [linkedin] DuckDuckGo search error: {e}")
+        return []
+
+
 def _serpapi_search(query: str, start: int = 0) -> list[dict]:
-    """Use SerpAPI to search Google for LinkedIn company pages."""
+    """Use SerpAPI to search Google for LinkedIn company pages (optional — paid)."""
     if SERPAPI_KEY == "YOUR_SERPAPI_KEY":
         return []
     try:
@@ -55,6 +96,13 @@ def _serpapi_search(query: str, start: int = 0) -> list[dict]:
     except Exception as e:
         print(f"  [linkedin] SerpAPI error: {e}")
         return []
+
+
+def _search_linkedin_urls(query: str, start: int = 0) -> list[dict]:
+    """Try SerpAPI first (if key present), fall back to free DuckDuckGo."""
+    if SERPAPI_KEY != "YOUR_SERPAPI_KEY":
+        return _serpapi_search(query, start)
+    return _ddg_search(query)
 
 
 def _extract_linkedin_url(result: dict) -> str | None:
@@ -177,23 +225,36 @@ def _build_company_dict(raw: dict) -> dict:
 
 
 def scrape(max_companies: int = 200) -> list[dict]:
-    """Scrape LinkedIn public company pages via SERP + direct page fetch."""
-    if SERPAPI_KEY == "YOUR_SERPAPI_KEY":
-        print("[linkedin] SerpAPI key not set — skipping LinkedIn scraper.")
-        return []
+    """
+    Scrape LinkedIn public company pages.
+    Uses DuckDuckGo (free, no key) by default.
+    Automatically upgrades to SerpAPI if SERPAPI_KEY is set.
+    """
+    using_serpapi = SERPAPI_KEY != "YOUR_SERPAPI_KEY"
+    print(f"[linkedin] URL discovery via {'SerpAPI' if using_serpapi else 'DuckDuckGo (free)'}")
 
-    # Step 1: Collect LinkedIn URLs via SerpAPI
+    # Step 1: Collect LinkedIn URLs via SERP (free DDG or paid SerpAPI)
     linkedin_urls: set[str] = set()
     for query in LINKEDIN_SEARCH_QUERIES:
-        for start in range(0, 50, 10):  # Up to 5 pages per query
-            results = _serpapi_search(query, start)
-            if not results:
-                break
+        if using_serpapi:
+            for start in range(0, 50, 10):  # Up to 5 pages per query
+                results = _serpapi_search(query, start)
+                if not results:
+                    break
+                for r in results:
+                    url = _extract_linkedin_url(r)
+                    if url:
+                        linkedin_urls.add(url)
+                time.sleep(1)
+        else:
+            # DuckDuckGo returns up to 20 results per call
+            results = _ddg_search(query, max_results=20)
             for r in results:
                 url = _extract_linkedin_url(r)
                 if url:
                     linkedin_urls.add(url)
-            time.sleep(1)
+            time.sleep(2)
+
         if len(linkedin_urls) >= max_companies * 2:
             break
 

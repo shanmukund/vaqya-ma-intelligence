@@ -22,10 +22,10 @@ from config import (
 
 # ─── Priority Tier Thresholds ──────────────────────────────────────────────────
 TIERS = [
-    (80, "A", "Contact within 30 days"),
-    (65, "B", "Contact within 90 days"),
-    (50, "C", "Watch list — revisit quarterly"),
-    (35, "D", "Low priority"),
+    (65, "A", "Contact within 30 days"),
+    (50, "B", "Contact within 90 days"),
+    (38, "C", "Watch list — revisit quarterly"),
+    (25, "D", "Low priority"),
     (0,  "—", "Archive"),
 ]
 

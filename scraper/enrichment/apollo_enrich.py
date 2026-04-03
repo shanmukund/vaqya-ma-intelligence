@@ -234,17 +234,24 @@ def enrich_targets(
         print("         Sign up free at https://www.apollo.io/ → Settings → API")
         return companies
 
-    # Filter to Tier A and B only
-    targets = [
-        c for c in companies
-        if (c.get("scores") or {}).get("priority_tier") in ENRICH_TIERS
-    ]
+    # Take top companies by composite score regardless of tier.
+    # Tier A/B may not exist yet on first run (data-poor records score low).
+    # Apollo enrichment provides the employee/revenue data needed to score higher.
+    # After enrichment + re-scoring, proper tiers will emerge.
+    sorted_companies = sorted(
+        companies,
+        key=lambda c: (c.get("scores") or {}).get("composite", 0),
+        reverse=True,
+    )
+    targets = sorted_companies[:credit_cap]  # Top N = credit budget
 
     if not targets:
-        print("[apollo] No Tier A/B companies to enrich.")
+        print("[apollo] No companies to enrich.")
         return companies
 
-    print(f"[apollo] Enriching {len(targets)} Tier A/B companies "
+    tiers_found = {(c.get("scores") or {}).get("priority_tier", "?") for c in targets}
+    print(f"[apollo] Enriching top {len(targets)} companies by score "
+          f"(tiers: {', '.join(sorted(tiers_found))}) "
           f"(credit cap: {credit_cap}/run)...")
 
     credit_counter = [0]   # mutable ref

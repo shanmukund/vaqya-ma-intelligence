@@ -73,6 +73,13 @@ jobs:
             echo "  ⬜ SEARCHAPI_KEY   — not set → Google Maps skipped"
             echo "                      Get 100 free credits: searchapi.io"
           fi
+          if [ -n "${{ secrets.APOLLO_API_KEY }}" ]; then
+            echo "  ✅ APOLLO_API_KEY  — Apollo.io enrichment (75 credits/mo free) — ACTIVE"
+            echo "                      Tier A/B: employee count + revenue + owner contacts"
+          else
+            echo "  ⬜ APOLLO_API_KEY  — not set → skipping contact enrichment"
+            echo "                      Sign up free: apollo.io → Settings → API"
+          fi
           echo "  ── Phase 2 paid (not active yet) ──"
           if [ -n "${{ secrets.SERPAPI_KEY }}" ]; then
             echo "  ✅ SERPAPI_KEY         — SerpAPI (paid) — ACTIVE"
@@ -93,6 +100,8 @@ jobs:
           BRAVE_API_KEY:       ${{ secrets.BRAVE_API_KEY }}
           # ── Free lifetime credits (100 total — use sparingly!) ────────────
           SEARCHAPI_KEY:       ${{ secrets.SEARCHAPI_KEY }}
+          # ── Free 75 credits/month (employee count + contacts) ─────────────
+          APOLLO_API_KEY:      ${{ secrets.APOLLO_API_KEY }}
           # ── Phase 2 paid keys (leave blank until Phase 2) ─────────────────
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           SERPAPI_KEY:         ${{ secrets.SERPAPI_KEY }}

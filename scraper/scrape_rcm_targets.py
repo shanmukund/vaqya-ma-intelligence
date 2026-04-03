@@ -46,12 +46,13 @@ from sources import yellowpages, clutch, hfma_mgma, linkedin_public
 from sources import google_maps
 
 # ─── Enrichment + scoring ─────────────────────────────────────────────────────
-from enrichment.deduplicator   import deduplicate
+from enrichment.deduplicator      import deduplicate
 from enrichment.revenue_estimator import estimate_revenue
-from enrichment.tech_detector  import detect_all
-from scoring.scorer            import score_all
+from enrichment.tech_detector     import detect_all
+from enrichment.apollo_enrich     import enrich_targets
+from scoring.scorer               import score_all
 
-from config import OUTPUT_FILE, TARGET_METROS, TIER2_METROS, BRAVE_API_KEY, SEARCHAPI_KEY
+from config import OUTPUT_FILE, TARGET_METROS, TIER2_METROS, BRAVE_API_KEY, SEARCHAPI_KEY, APOLLO_API_KEY
 
 # ── Source tiers ───────────────────────────────────────────────────────────────
 # Phase 1 — fully free (active now)
@@ -244,10 +245,26 @@ def run(
     print("\n[score] Scoring all companies...")
     score_all(merged)
 
-    # Step 7: Print summary
+    # Step 7: Apollo enrichment — employee count + revenue + owner contacts
+    #         Only runs if APOLLO_API_KEY is set; targets Tier A and B only
+    if APOLLO_API_KEY and APOLLO_API_KEY != "YOUR_APOLLO_API_KEY":
+        print("\n[enrich] Apollo.io — enriching Tier A/B targets (employee + revenue + contacts)...")
+        enrich_targets(merged, credit_cap=70)
+        # Re-run revenue estimation now that we have confirmed employee counts
+        print("\n[enrich] Re-estimating revenues with Apollo employee data...")
+        for company in merged:
+            estimate_revenue(company)
+        # Re-score with updated data
+        print("\n[score] Re-scoring with enriched data...")
+        score_all(merged)
+    else:
+        print("\n[apollo] APOLLO_API_KEY not set — skipping contact enrichment.")
+        print("         Sign up free: https://www.apollo.io/ → Settings → API")
+
+    # Step 8: Print summary
     _print_summary(merged)
 
-    # Step 8: Save output
+    # Step 9: Save output
     save_output(merged, dry_run=dry_run)
 
     elapsed = time.time() - start_time

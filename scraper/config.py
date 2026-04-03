@@ -38,6 +38,13 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY
 SERPAPI_KEY         = os.getenv("SERPAPI_KEY",          "YOUR_SERPAPI_KEY")
 BRAVE_API_KEY       = os.getenv("BRAVE_API_KEY",        "")
 SEARCHAPI_KEY       = os.getenv("SEARCHAPI_KEY",        "YOUR_SEARCHAPI_KEY")
+#
+#  FREE (75 credits/month, no card required):
+#    apollo  — employee count + revenue band + owner contacts for Tier A/B targets
+#              Sign up: https://www.apollo.io/ → Settings → Integrations → API
+#              900 credits/year (75/mo); 1 credit = 1 email export
+#              Org data (employee count, revenue) is FREE with no credit cost
+APOLLO_API_KEY      = os.getenv("APOLLO_API_KEY",       "YOUR_APOLLO_API_KEY")
 
 # ─── Output ────────────────────────────────────────────────────────────────────
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "rcm_targets.json")

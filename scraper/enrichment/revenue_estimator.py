@@ -98,6 +98,30 @@ def estimate_revenue(company: dict) -> dict:
         emp_est = _parse_emp_range(company["employee_count_range"])
         company["employee_count_est"] = emp_est
 
+    # Proxy: use job posting count as a rough employee size signal
+    # Companies posting billing jobs at scale are running meaningful operations.
+    # This gives revenue estimates to NPPES/Indeed records with no employee data.
+    if not emp_est and company.get("job_posting_count"):
+        job_count = int(company.get("job_posting_count") or 0)
+        if job_count >= 16:
+            emp_est = 150   # 200+ staff — large regional shop
+            range_str = "200+"
+        elif job_count >= 6:
+            emp_est = 75    # 51–200 staff — mid-size
+            range_str = "51-200"
+        elif job_count >= 3:
+            emp_est = 25    # 11–50 staff — small-mid
+            range_str = "11-50"
+        else:
+            emp_est = 5     # 1–10 staff — micro
+            range_str = "1-10"
+        # Only set if we didn't already have a range from another source
+        if not company.get("employee_count_range"):
+            company["employee_count_range"] = range_str
+        company["employee_count_est"] = emp_est
+        # Mark as low confidence — this is an indirect signal
+        company["data_confidence"] = "low"
+
     if not emp_est:
         company.setdefault("revenue_band", "Unknown")
         company.setdefault("estimated_revenue", None)

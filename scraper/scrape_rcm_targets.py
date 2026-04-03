@@ -150,53 +150,63 @@ def run(
 
     step = 0
 
+    def _run_source(name: str, fn, *args, **kwargs) -> list[dict]:
+        """Run a scraper source safely — a crash here never kills the full run."""
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            print(f"  [{name}] ⚠️  Source failed with: {exc.__class__.__name__}: {exc}")
+            print(f"  [{name}]    Skipping — other sources will continue.")
+            return []
+
     # ── FREE SOURCES (no key required) ────────────────────────────────────────
     if "nppes" in sources:
         step += 1
         print(f"\n[{step}] NPPES NPI Registry (FREE — CMS government database)...")
-        results = nppes.scrape()
+        results = _run_source("nppes", nppes.scrape)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "indeed" in sources:
         step += 1
         print(f"\n[{step}] Indeed Job Postings (FREE)...")
-        results = indeed_jobs.scrape(metros=metros or TARGET_METROS[:15])
+        results = _run_source("indeed", indeed_jobs.scrape,
+                              metros=metros or TARGET_METROS[:15])
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "sos" in sources:
         step += 1
         print(f"\n[{step}] Secretary of State Registries (FREE)...")
-        results = secretary_of_state.scrape()
+        results = _run_source("sos", secretary_of_state.scrape)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "yellowpages" in sources:
         step += 1
         print(f"\n[{step}] Yellow Pages Directory (FREE)...")
-        results = yellowpages.scrape(metros=metros)
+        results = _run_source("yellowpages", yellowpages.scrape, metros=metros)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "clutch" in sources:
         step += 1
         print(f"\n[{step}] Clutch.co RCM Directory (FREE — employee + revenue data)...")
-        results = clutch.scrape()
+        results = _run_source("clutch", clutch.scrape)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "hfma_mgma" in sources:
         step += 1
         print(f"\n[{step}] HFMA/MGMA Chapter Directories (FREE)...")
-        results = hfma_mgma.scrape()
+        results = _run_source("hfma_mgma", hfma_mgma.scrape)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
     if "linkedin" in sources:
         step += 1
-        print(f"\n[{step}] LinkedIn Public Pages (FREE via DuckDuckGo, or SerpAPI if key set)...")
-        results = linkedin_public.scrape()
+        print(f"\n[{step}] LinkedIn Public Pages (FREE via DuckDuckGo, or Brave if key set)...")
+        results = _run_source("linkedin", linkedin_public.scrape, max_companies=50)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
@@ -205,9 +215,8 @@ def run(
         step += 1
         print(f"\n[{step}] Google Maps via SearchAPI.io (100 free lifetime credits)...")
         print(f"      Targeting tier-2 metros — owner-operated, lower PE competition")
-        # Use caller-specified metros if given, else default to TIER2_METROS
         gm_metros = metros if metros is not None else None
-        results = google_maps.scrape(metros=gm_metros)
+        results = _run_source("google_maps", google_maps.scrape, metros=gm_metros)
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 

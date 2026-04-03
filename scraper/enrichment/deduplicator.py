@@ -105,13 +105,27 @@ def deduplicate(
     incoming  — fresh records from all scrapers this run
 
     Returns the merged, deduplicated list.
+
+    Performance note: fuzzy name matching is O(n²) and is SKIPPED when the
+    batch is large (>500 records). Domain + phone O(1) dict lookups handle
+    the vast majority of duplicates. Fuzzy is only valuable for the small
+    number of Clutch/LinkedIn records that lack both domain and phone.
     """
     existing = existing or []
+
+    # Only use fuzzy matching for small batches — avoids O(n²) with NPPES 5K+ records
+    USE_FUZZY = len(incoming) <= 500
+
+    if not USE_FUZZY:
+        print(f"[dedup] Large batch ({len(incoming)} records) — "
+              f"skipping fuzzy name match (domain+phone dedup only). Fast O(n) mode.")
 
     # Build lookup indexes on existing records
     existing_by_id:     dict[str, dict] = {}
     existing_by_domain: dict[str, dict] = {}
     existing_by_phone:  dict[str, dict] = {}
+    # O(1) name lookup for existing (normalized)
+    existing_by_name:   dict[str, dict] = {}
 
     for rec in existing:
         if rec.get("id"):
@@ -122,15 +136,20 @@ def deduplicate(
         phone = normalize_phone(rec.get("phone") or "")
         if phone:
             existing_by_phone[phone] = rec
+        name = normalize_name(rec.get("company_name") or "")
+        if name:
+            existing_by_name[name] = rec
 
     # Deduplicate incoming records among themselves first
     deduped_incoming: list[dict] = []
     seen_domains: dict[str, int] = {}
     seen_phones:  dict[str, int] = {}
+    seen_names:   dict[str, int] = {}  # exact normalized name → index
 
     for rec in incoming:
         domain = normalize_domain(rec.get("website") or "")
         phone  = normalize_phone(rec.get("phone") or "")
+        name   = normalize_name(rec.get("company_name") or "")
 
         # Check domain duplicate within this batch
         if domain and domain in seen_domains:
@@ -144,13 +163,20 @@ def deduplicate(
             deduped_incoming[idx] = _merge_records(deduped_incoming[idx], rec)
             continue
 
-        # Check fuzzy name match within this batch (last resort)
+        # Exact normalized name match within this batch (O(1))
+        if name and name in seen_names:
+            idx = seen_names[name]
+            deduped_incoming[idx] = _merge_records(deduped_incoming[idx], rec)
+            continue
+
+        # Fuzzy name match within this batch (O(n) — only for small batches)
         matched_idx = None
-        for i, existing_rec in enumerate(deduped_incoming):
-            sim = _name_similarity(rec.get("company_name", ""), existing_rec.get("company_name", ""))
-            if sim >= 0.85:
-                matched_idx = i
-                break
+        if USE_FUZZY and name:
+            for i, existing_rec in enumerate(deduped_incoming):
+                sim = _name_similarity(name, existing_rec.get("company_name", ""))
+                if sim >= 0.85:
+                    matched_idx = i
+                    break
         if matched_idx is not None:
             deduped_incoming[matched_idx] = _merge_records(deduped_incoming[matched_idx], rec)
             continue
@@ -164,55 +190,61 @@ def deduplicate(
             seen_domains[domain] = idx
         if phone:
             seen_phones[phone] = idx
+        if name:
+            seen_names[name] = idx
 
     # Now merge deduped incoming with existing records
-    result: list[dict] = list(existing)  # Start with all existing (preserves pipeline data)
+    # Use result_index for O(1) position lookup instead of result.index() which is O(n)
+    result: list[dict] = list(existing)
+    result_index: dict[str, int] = {rec.get("id", ""): i for i, rec in enumerate(result)}
+
     new_count     = 0
     updated_count = 0
 
     for inc in deduped_incoming:
         domain = normalize_domain(inc.get("website") or "")
         phone  = normalize_phone(inc.get("phone") or "")
+        name   = normalize_name(inc.get("company_name") or "")
 
-        # Match by ID
+        matched_idx = None
+
+        # Match by ID (O(1))
         if inc.get("id") and inc["id"] in existing_by_id:
-            idx = result.index(existing_by_id[inc["id"]])
-            result[idx] = _merge_records(result[idx], inc)
-            updated_count += 1
-            continue
+            ex = existing_by_id[inc["id"]]
+            matched_idx = result_index.get(ex.get("id", ""))
 
-        # Match by domain
-        if domain and domain in existing_by_domain:
-            matched = existing_by_domain[domain]
-            idx = result.index(matched)
-            result[idx] = _merge_records(result[idx], inc)
-            updated_count += 1
-            continue
+        # Match by domain (O(1))
+        elif domain and domain in existing_by_domain:
+            ex = existing_by_domain[domain]
+            matched_idx = result_index.get(ex.get("id", ""))
 
-        # Match by phone
-        if phone and phone in existing_by_phone:
-            matched = existing_by_phone[phone]
-            idx = result.index(matched)
-            result[idx] = _merge_records(result[idx], inc)
-            updated_count += 1
-            continue
+        # Match by phone (O(1))
+        elif phone and phone in existing_by_phone:
+            ex = existing_by_phone[phone]
+            matched_idx = result_index.get(ex.get("id", ""))
 
-        # Fuzzy name match against existing
-        matched_existing = None
-        for ex in existing:
-            sim = _name_similarity(inc.get("company_name", ""), ex.get("company_name", ""))
-            if sim >= 0.85:
-                matched_existing = ex
-                break
-        if matched_existing:
-            idx = result.index(matched_existing)
-            result[idx] = _merge_records(result[idx], inc)
-            updated_count += 1
-            continue
+        # Exact normalized name match against existing (O(1))
+        elif name and name in existing_by_name:
+            ex = existing_by_name[name]
+            matched_idx = result_index.get(ex.get("id", ""))
 
-        # Genuinely new
-        result.append(inc)
-        new_count += 1
+        # Fuzzy name match against existing (O(n) — small batches only)
+        elif USE_FUZZY and name:
+            for ex in existing:
+                sim = _name_similarity(name, ex.get("company_name", ""))
+                if sim >= 0.85:
+                    matched_idx = result_index.get(ex.get("id", ""))
+                    break
+
+        if matched_idx is not None:
+            result[matched_idx] = _merge_records(result[matched_idx], inc)
+            updated_count += 1
+        else:
+            # Genuinely new — add to result and update index
+            new_idx = len(result)
+            result.append(inc)
+            result_index[inc.get("id", "")] = new_idx
+            new_count += 1
 
     print(f"[dedup] {new_count} new | {updated_count} updated | "
           f"{len(existing)} existing preserved | {len(result)} total")

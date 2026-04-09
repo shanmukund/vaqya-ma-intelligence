@@ -125,6 +125,18 @@ def _normalize(record: dict) -> dict:
     if not spec_list and taxons:
         spec_list = [taxons[0].get("desc", "")]
 
+    # Extract enumeration date → use as founding year proxy
+    # NPI-2 orgs register when they begin billing, so this is a reasonable proxy
+    enum_date = basic.get("enumeration_date") or ""
+    founded_year = None
+    company_age  = None
+    if enum_date:
+        try:
+            founded_year = int(enum_date[:4])
+            company_age  = datetime.now().year - founded_year
+        except (ValueError, TypeError):
+            pass
+
     now = datetime.now(timezone.utc).isoformat()
     return {
         "id":                   str(uuid.uuid4()),
@@ -140,8 +152,8 @@ def _normalize(record: dict) -> dict:
         "revenue_band":         "Unknown",
         "employee_count_range": None,
         "employee_count_est":   None,
-        "founded_year":         None,
-        "company_age":          None,
+        "founded_year":         founded_year,
+        "company_age":          company_age,
         "owner_signals":        ["npi_registered"],
         "specialties":          spec_list,
         "technology_signals":   [],

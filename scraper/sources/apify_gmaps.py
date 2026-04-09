@@ -85,10 +85,11 @@ def _run_actor(metros: list[dict], queries: list[str]) -> str | None:
     }
 
     params = {
-        "token":          APIFY_API_TOKEN,
-        "maxTotalChargeUsd": MAX_CHARGE_USD,
+        "token":             APIFY_API_TOKEN,
+        "maxTotalChargeUsd": str(MAX_CHARGE_USD),
     }
 
+    resp = None
     try:
         resp = requests.post(
             APIFY_RUN_URL,
@@ -96,15 +97,23 @@ def _run_actor(metros: list[dict], queries: list[str]) -> str | None:
             params=params,
             timeout=30,
         )
-        resp.raise_for_status()
-        run_data = resp.json().get("data") or {}
-        run_id   = run_data.get("id")
+        if not resp.ok:
+            print(f"  [apify_gmaps] HTTP {resp.status_code} error starting run")
+            print(f"  [apify_gmaps] Response: {resp.text[:500]}")
+            return None, None
+        run_data   = resp.json().get("data") or {}
+        run_id     = run_data.get("id")
         dataset_id = run_data.get("defaultDatasetId")
+        if not run_id:
+            print(f"  [apify_gmaps] No run_id in response: {resp.text[:300]}")
+            return None, None
         print(f"  [apify_gmaps] Run started: {run_id}")
         print(f"  [apify_gmaps] Dataset: {dataset_id}")
         return run_id, dataset_id
     except Exception as e:
+        body = resp.text[:300] if resp is not None else "no response"
         print(f"  [apify_gmaps] Failed to start actor run: {e}")
+        print(f"  [apify_gmaps] Response body: {body}")
         return None, None
 
 

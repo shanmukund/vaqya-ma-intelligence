@@ -50,21 +50,27 @@ def _run_crawler(urls: list[str]) -> tuple[str | None, str | None]:
     """Submit Apify website crawler run. Returns (run_id, dataset_id)."""
     start_urls = [{"url": url} for url in urls]
 
+    # website-content-crawler input schema:
+    # https://apify.com/apify/website-content-crawler/input-schema
     payload = {
         "startUrls":             start_urls,
-        "maxCrawlPages":         len(urls) * MAX_PAGES_PER_URL,
         "maxCrawlDepth":         0,           # homepage only
         "crawlerType":           "cheerio",   # fast + cheap (no JS needed for signal scan)
-        "outputFormats":         ["markdown"],
-        "removeCookieWarnings":  True,
+        "outputFormats":         ["markdown", "text"],
+        "maxResults":            len(urls),   # one result per URL
         "removeElementsCssSelector": "nav, footer, header, .cookie, #cookie, .menu, .sidebar",
     }
 
+    # maxTotalChargeUsd is a query param for pay-per-event actors
     params = {
         "token":             APIFY_API_TOKEN,
-        "maxTotalChargeUsd": MAX_CHARGE_USD,
+        "maxTotalChargeUsd": str(MAX_CHARGE_USD),
     }
 
+    print(f"  [apify_signals] Submitting {len(urls)} URLs to website-content-crawler")
+    print(f"  [apify_signals] Cost cap: ${MAX_CHARGE_USD:.2f}")
+
+    resp = None
     try:
         resp = requests.post(
             APIFY_RUN_URL,
@@ -72,14 +78,22 @@ def _run_crawler(urls: list[str]) -> tuple[str | None, str | None]:
             params=params,
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            print(f"  [apify_signals] HTTP {resp.status_code} error starting run")
+            print(f"  [apify_signals] Response: {resp.text[:500]}")
+            return None, None
         data       = resp.json().get("data") or {}
         run_id     = data.get("id")
         dataset_id = data.get("defaultDatasetId")
+        if not run_id:
+            print(f"  [apify_signals] No run_id in response: {resp.text[:300]}")
+            return None, None
         print(f"  [apify_signals] Run started: {run_id} | {len(urls)} URLs")
         return run_id, dataset_id
     except Exception as e:
+        body = resp.text[:300] if resp is not None else "no response"
         print(f"  [apify_signals] Failed to start run: {e}")
+        print(f"  [apify_signals] Response body: {body}")
         return None, None
 
 
@@ -150,6 +164,25 @@ def _normalize_domain(website: str) -> str:
     return url.split("/")[0]
 
 
+def _validate_token() -> bool:
+    """Quick GET to /v2/users/me to verify token is valid before starting a run."""
+    try:
+        resp = requests.get(
+            "https://api.apify.com/v2/users/me",
+            params={"token": APIFY_API_TOKEN},
+            timeout=10,
+        )
+        if resp.ok:
+            username = (resp.json().get("data") or {}).get("username", "?")
+            print(f"  [apify_signals] Token valid — Apify user: {username}")
+            return True
+        print(f"  [apify_signals] Token invalid — HTTP {resp.status_code}: {resp.text[:200]}")
+        return False
+    except Exception as e:
+        print(f"  [apify_signals] Token check failed: {e}")
+        return False
+
+
 def enrich_signals(
     companies:      list[dict],
     max_sites:      int  = 500,    # max websites to visit per run
@@ -167,6 +200,11 @@ def enrich_signals(
     """
     if not APIFY_API_TOKEN or APIFY_API_TOKEN == "YOUR_APIFY_API_TOKEN":
         print("[apify_signals] APIFY_API_TOKEN not set — skipping signal enrichment.")
+        return companies
+
+    # Validate token before doing anything
+    if not _validate_token():
+        print("[apify_signals] Skipping — token validation failed.")
         return companies
 
     # Build website → company index

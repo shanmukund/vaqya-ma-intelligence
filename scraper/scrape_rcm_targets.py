@@ -322,6 +322,26 @@ def _print_summary(targets: list[dict]) -> None:
         count = revenue_counts.get(band, 0)
         if count:
             print(f"    {band:15s}: {count}")
+
+    # Enrichment stats
+    with_website     = sum(1 for t in targets if t.get("website"))
+    apify_scanned    = sum(1 for t in targets if t.get("_apify_scanned"))
+    with_revenue     = sum(1 for t in targets if t.get("revenue_band") not in ("Unknown", None, ""))
+    offshore_count   = sum(1 for t in targets if t.get("offshore_mentions"))
+    pe_count         = sum(1 for t in targets if t.get("pe_backed"))
+    with_contacts    = sum(1 for t in targets if t.get("contacts"))
+    owner_op_count   = sum(1 for t in targets
+                           if "owner_operated" in (t.get("owner_signals") or []))
+
+    print(f"\n  Enrichment:")
+    print(f"    With website:     {with_website}")
+    print(f"    Apify scanned:    {apify_scanned}")
+    print(f"    With revenue:     {with_revenue}")
+    print(f"    With contacts:    {with_contacts}")
+    print(f"\n  Signals:")
+    print(f"    Offshore ops:     {offshore_count}")
+    print(f"    PE-backed:        {pe_count}")
+    print(f"    Owner-operated:   {owner_op_count}")
     print(f"{'─'*50}\n")
 
 

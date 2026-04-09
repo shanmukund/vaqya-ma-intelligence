@@ -321,7 +321,23 @@ def main() -> None:
                         help="Skip website technology detection")
     parser.add_argument("--dry-run",      action="store_true",
                         help="Run without writing output file")
+    parser.add_argument("--apollo-csv",   default="",
+                        help="Path to Apollo.io bulk CSV export to merge into targets. "
+                             "Skips all scrapers and just imports + merges the CSV. "
+                             "Example: --apollo-csv ~/Downloads/apollo_export.csv")
     args = parser.parse_args()
+
+    # Apollo CSV import mode — skip all scraping, just merge the CSV
+    if args.apollo_csv:
+        from apollo_csv_import import import_csv, merge_and_save
+        print(f"\n[main] Apollo CSV import mode: {args.apollo_csv}")
+        incoming = import_csv(args.apollo_csv, dry_run=args.dry_run)
+        if incoming:
+            merge_and_save(incoming, dry_run=args.dry_run)
+        else:
+            print("[main] No valid records parsed from CSV.")
+            sys.exit(1)
+        return
 
     # If no --sources flag given, auto-detect based on keys present
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]

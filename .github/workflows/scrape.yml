@@ -80,6 +80,13 @@ jobs:
             echo "  ⬜ APOLLO_API_KEY  — not set → skipping contact enrichment"
             echo "                      Sign up free: apollo.io → Settings → API"
           fi
+          if [ -n "${{ secrets.APIFY_API_TOKEN }}" ]; then
+            echo "  ✅ APIFY_API_TOKEN — Apify platform (\$5 free/mo resets monthly) — ACTIVE"
+            echo "                      Google Maps discovery + website signal detection"
+          else
+            echo "  ⬜ APIFY_API_TOKEN — not set → Apify sources skipped"
+            echo "                      Sign up free: apify.com → Settings → Integrations"
+          fi
           echo "  ── Phase 2 paid (not active yet) ──"
           if [ -n "${{ secrets.SERPAPI_KEY }}" ]; then
             echo "  ✅ SERPAPI_KEY         — SerpAPI (paid) — ACTIVE"
@@ -102,6 +109,8 @@ jobs:
           SEARCHAPI_KEY:       ${{ secrets.SEARCHAPI_KEY }}
           # ── Free 75 credits/month (employee count + contacts) ─────────────
           APOLLO_API_KEY:      ${{ secrets.APOLLO_API_KEY }}
+          # ── Free $5/month resets monthly (Google Maps + website signals) ──
+          APIFY_API_TOKEN:     ${{ secrets.APIFY_API_TOKEN }}
           # ── Phase 2 paid keys (leave blank until Phase 2) ─────────────────
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           SERPAPI_KEY:         ${{ secrets.SERPAPI_KEY }}

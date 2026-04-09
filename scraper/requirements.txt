@@ -15,3 +15,7 @@ googlemaps>=4.10.0
 # ── Optional paid source: SerpAPI (LinkedIn high-volume URL discovery) ─────────
 # Only needed if SERPAPI_KEY is set. Falls back to DuckDuckGo if not set.
 serpapi>=0.1.5
+
+# ── Apify platform ($5 free/mo — Google Maps + website signal detection) ────────
+# Only needed if APIFY_API_TOKEN is set. Uses REST API directly (no SDK needed).
+# apify-client>=1.7.0  # optional SDK — we use requests directly to stay lean

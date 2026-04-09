@@ -45,6 +45,13 @@ SEARCHAPI_KEY       = os.getenv("SEARCHAPI_KEY",        "YOUR_SEARCHAPI_KEY")
 #              900 credits/year (75/mo); 1 credit = 1 email export
 #              Org data (employee count, revenue) is FREE with no credit cost
 APOLLO_API_KEY      = os.getenv("APOLLO_API_KEY",       "YOUR_APOLLO_API_KEY")
+#
+#  FREE ($5/month credit, resets monthly — no card required):
+#    apify  — managed web scraping platform
+#             Google Maps: $4/1,000 places → ~1,250 places/month free
+#             Website crawler: ~$0.50-$2/1,000 pages → offshore/tech/PE signals
+#             Sign up: https://apify.com/ → Settings → Integrations → API token
+APIFY_API_TOKEN     = os.getenv("APIFY_API_TOKEN",      "YOUR_APIFY_API_TOKEN")
 
 # ─── Output ────────────────────────────────────────────────────────────────────
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "rcm_targets.json")

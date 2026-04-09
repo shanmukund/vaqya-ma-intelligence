@@ -43,16 +43,17 @@ from typing import Any
 from sources import nppes, indeed_jobs, secretary_of_state
 from sources import yellowpages, clutch, hfma_mgma, linkedin_public
 # Phase 2 paid (gracefully skipped when key not set)
-from sources import google_maps
+from sources import google_maps, apify_gmaps
 
 # ─── Enrichment + scoring ─────────────────────────────────────────────────────
 from enrichment.deduplicator      import deduplicate
 from enrichment.revenue_estimator import estimate_revenue
 from enrichment.tech_detector     import detect_all
 from enrichment.apollo_enrich     import enrich_targets
+from enrichment.apify_signals     import enrich_signals
 from scoring.scorer               import score_all
 
-from config import OUTPUT_FILE, TARGET_METROS, TIER2_METROS, BRAVE_API_KEY, SEARCHAPI_KEY, APOLLO_API_KEY
+from config import OUTPUT_FILE, TARGET_METROS, TIER2_METROS, BRAVE_API_KEY, SEARCHAPI_KEY, APOLLO_API_KEY, APIFY_API_TOKEN
 
 # ── Source tiers ───────────────────────────────────────────────────────────────
 # Phase 1 — fully free (active now)
@@ -60,7 +61,7 @@ ALL_SOURCES  = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma",
                 "linkedin", "google_maps"]
 FREE_SOURCES = ["nppes", "indeed", "sos", "yellowpages", "clutch", "hfma_mgma", "linkedin"]
 # Phase 2 — paid (not in default run)
-PAID_SOURCES = ["google_maps"]
+PAID_SOURCES = ["google_maps", "apify_gmaps"]
 
 def _default_sources() -> list[str]:
     """
@@ -77,6 +78,10 @@ def _default_sources() -> list[str]:
         sources.append("google_maps")
         print("[main] SEARCHAPI_KEY detected — Google Maps (tier-2 metros) ENABLED "
               "(100 lifetime free credits → use sparingly)")
+    if APIFY_API_TOKEN and APIFY_API_TOKEN != "YOUR_APIFY_API_TOKEN":
+        sources.append("apify_gmaps")
+        print("[main] APIFY_API_TOKEN detected — Apify Google Maps ENABLED "
+              "($4/1K places, $5 free/mo)")
     return sources
 
 
@@ -221,6 +226,15 @@ def run(
         all_raw.extend(results)
         print(f"      → {len(results)} records")
 
+    # ── APIFY GOOGLE MAPS ($4/1K places, $5 free/mo resets monthly) ───────────
+    if "apify_gmaps" in sources:
+        step += 1
+        print(f"\n[{step}] Google Maps via Apify ($4/1K places, $5 free credit/mo)...")
+        print(f"      Tier-2 metros focus, $4 cost cap per run")
+        results = _run_source("apify_gmaps", apify_gmaps.scrape, metros=metros)
+        all_raw.extend(results)
+        print(f"      → {len(results)} records")
+
     print(f"\n[main] Total raw records: {len(all_raw)}")
 
     if not all_raw and not existing:
@@ -231,8 +245,12 @@ def run(
     print("\n[enrich] Deduplicating...")
     merged = deduplicate(all_raw, existing)
 
-    # Step 4: Technology signal detection (website visits)
-    if tech_scan and merged:
+    # Step 4: Apify website signal enrichment (offshore/tech/PE detection)
+    if APIFY_API_TOKEN and APIFY_API_TOKEN != "YOUR_APIFY_API_TOKEN":
+        print(f"\n[enrich] Apify website signal scan (offshore/tech/PE detection)...")
+        enrich_signals(merged, max_sites=500)
+    elif tech_scan and merged:
+        # Fallback: local Playwright tech detection (slower, more easily blocked)
         print(f"\n[enrich] Technology detection (visiting websites)...")
         detect_all(merged)
 

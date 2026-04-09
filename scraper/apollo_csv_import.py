@@ -47,13 +47,13 @@ COL_COMPANY     = ["Company Name", "company_name", "Name", "Organization Name"]
 COL_WEBSITE     = ["Website", "website", "Domain", "Company Domain"]
 COL_EMPLOYEES   = ["# Employees", "Employees", "Employee Count", "Number of Employees", "employees"]
 COL_REVENUE     = ["Annual Revenue", "Revenue", "annual_revenue", "Estimated Annual Revenue"]
-COL_CITY        = ["City", "city", "HQ City"]
-COL_STATE       = ["State", "state", "HQ State"]
-COL_COUNTRY     = ["Country", "country"]
+COL_CITY        = ["Company City", "City", "city", "HQ City"]
+COL_STATE       = ["Company State", "State", "state", "HQ State"]
+COL_COUNTRY     = ["Company Country", "Country", "country"]
 COL_FOUNDED     = ["Founded Year", "Year Founded", "founded_year", "Founded"]
 COL_INDUSTRY    = ["Industry", "industry", "Industries"]
 COL_KEYWORDS    = ["Keywords", "keywords", "Specialties"]
-COL_LINKEDIN    = ["LinkedIn URL", "linkedin_url", "LinkedIn", "Company Linkedin Url"]
+COL_LINKEDIN    = ["Company Linkedin Url", "LinkedIn URL", "linkedin_url", "LinkedIn"]
 COL_PHONE       = ["Phone", "phone", "Company Phone", "Phone Number"]
 COL_PERSON_NAME = ["Person Name", "Contact Name", "First Name + Last Name"]
 COL_PERSON_TITLE= ["Person Title", "Title", "Contact Title", "Job Title"]
@@ -293,7 +293,7 @@ def merge_and_save(
     # Load existing data
     existing = []
     if os.path.exists(output_file):
-        with open(output_file) as f:
+        with open(output_file, encoding="utf-8", errors="replace") as f:
             data = json.load(f)
             existing = data.get("targets") or []
         print(f"[apollo_csv] Loaded {len(existing)} existing targets from {output_file}")
@@ -339,7 +339,7 @@ def merge_and_save(
     else:
         with open(output_file, "w") as f:
             json.dump(output, f, indent=2, default=str)
-        print(f"\n[apollo_csv] ✅ Saved {len(merged)} targets to {output_file}")
+        print(f"\n[apollo_csv] Saved {len(merged)} targets to {output_file}")
 
     print(f"\n{'='*55}")
     print(f"  Import Summary")
